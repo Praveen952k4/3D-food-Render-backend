@@ -21,31 +21,42 @@ const app = express();
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
-  process.env.FRONTEND_URL, // Add your frontend URL in .env
-  // Add your deployed frontend URLs here
-];
+  'https://3-d-food-rendering-frontend-zunt-b1jrhidgj.vercel.app', // Your deployed frontend
+  'https://3-d-food-rendering-frontend-zunt.vercel.app', // Alternative frontend URL
+  process.env.FRONTEND_URL, // Additional frontend URL from env
+].filter(Boolean); // Remove undefined values
 
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or Postman)
     if (!origin) return callback(null, true);
     
-    // In development, allow all origins
-    if (process.env.NODE_ENV !== 'production') {
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      console.log('✅ CORS allowed origin:', origin);
       return callback(null, true);
     }
     
-    // In production, check against allowed origins
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn('⚠️ CORS blocked origin:', origin);
-      callback(null, true); // Still allow for now, change to false in strict production
+    // Allow localhost in development
+    if (origin && origin.includes('localhost')) {
+      console.log('✅ CORS allowed localhost:', origin);
+      return callback(null, true);
     }
+    
+    // Allow all Vercel preview deployments
+    if (origin && origin.includes('vercel.app')) {
+      console.log('✅ CORS allowed Vercel deployment:', origin);
+      return callback(null, true);
+    }
+    
+    console.warn('⚠️ CORS would block origin (but allowing):', origin);
+    callback(null, true); // Allow for now, log the warning
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'X-Request-Id'],
+  maxAge: 86400, // 24 hours
 }));
 
 app.use(bodyParser.json());

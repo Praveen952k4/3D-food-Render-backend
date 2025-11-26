@@ -4,7 +4,7 @@ const orderSchema = new mongoose.Schema({
   orderNumber: {
     type: String,
     unique: true,
-    required: true,
+    required: false, // Will be auto-generated in pre-save hook
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -78,8 +78,8 @@ const orderSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['phonepe', 'card', 'cash'],
-    default: 'phonepe',
+    enum: ['phonepe', 'card', 'cash', 'online'],
+    default: 'cash',
   },
   paymentId: {
     type: String,

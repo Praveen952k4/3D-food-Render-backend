@@ -28,6 +28,9 @@ router.get('/', authenticate, async (req, res) => {
 // POST /api/orders - Create new order
 router.post('/', authenticate, async (req, res) => {
   try {
+    console.log('📝 Creating order for user:', req.user.id);
+    console.log('📦 Order data received:', JSON.stringify(req.body, null, 2));
+    
     const {
       items,
       subtotal,
@@ -43,6 +46,7 @@ router.post('/', authenticate, async (req, res) => {
     } = req.body;
 
     if (!items || items.length === 0) {
+      console.error('❌ Validation failed: No items in order');
       return res.status(400).json({ 
         success: false, 
         message: 'Order must contain at least one item' 
@@ -50,6 +54,7 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     if (!customerName || !customerPhone) {
+      console.error('❌ Validation failed: Missing customer details');
       return res.status(400).json({
         success: false,
         message: 'Customer name and phone are required'
@@ -57,6 +62,7 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     if (!orderType || !['dine-in', 'takeaway'].includes(orderType)) {
+      console.error('❌ Validation failed: Invalid order type:', orderType);
       return res.status(400).json({
         success: false,
         message: 'Order type must be either dine-in or takeaway'
@@ -64,12 +70,15 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     if (orderType === 'dine-in' && !tableNumber) {
+      console.error('❌ Validation failed: Missing table number for dine-in');
       return res.status(400).json({
         success: false,
         message: 'Table number is required for dine-in orders'
       });
     }
 
+    console.log('✅ All validations passed, creating order...');
+    
     const order = new Order({
       userId: req.user.id,
       customerPhone,
@@ -88,6 +97,7 @@ router.post('/', authenticate, async (req, res) => {
     });
 
     await order.save();
+    console.log('✅ Order saved successfully:', order.orderNumber);
 
     res.json({ 
       success: true, 
@@ -96,11 +106,20 @@ router.post('/', authenticate, async (req, res) => {
       orderNumber: order.orderNumber
     });
   } catch (error) {
-    console.error('Create order error:', error);
+    console.error('❌ Create order error:', error);
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    if (error.errors) {
+      console.error('Validation errors:', JSON.stringify(error.errors, null, 2));
+    }
     res.status(500).json({ 
       success: false, 
       message: 'Failed to create order',
-      error: error.message
+      error: error.message,
+      details: error.errors ? Object.keys(error.errors).map(key => ({
+        field: key,
+        message: error.errors[key].message
+      })) : undefined
     });
   }
 });

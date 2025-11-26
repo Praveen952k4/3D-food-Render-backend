@@ -1,0 +1,122 @@
+const express = require('express');
+const cors = require('cors');
+const dotenv = require('dotenv');
+const mongoose = require('mongoose');
+const bodyParser = require('body-parser');
+
+// Load environment variables
+dotenv.config();
+
+// Import routes
+const authRoutes = require('./routes/auth');
+const orderRoutes = require('./routes/orders');
+const foodRoutes = require('./routes/food');
+const adminRoutes = require('./routes/admin');
+const analyticsRoutes = require('./routes/analytics');
+const couponRoutes = require('./routes/coupons');
+
+const app = express();
+
+// Enhanced CORS configuration for mobile access
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or Postman)
+    if (!origin) return callback(null, true);
+    
+    // Allow all origins in development
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Add request logging for debugging
+app.use((req, res, next) => {
+  console.log(`📨 ${req.method} ${req.path} - ${new Date().toISOString()}`);
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log('📦 Body:', JSON.stringify(req.body, null, 2));
+  }
+  next();
+});
+
+// Database connection
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(async () => {
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('✅ MongoDB Connected Successfully!');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📊 Database:', mongoose.connection.db.databaseName);
+  console.log('🌐 Host:', mongoose.connection.host);
+  console.log('📝 Connection State:', mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected');
+  
+  // Get existing collections
+  const collections = await mongoose.connection.db.listCollections().toArray();
+  console.log(`📁 Collections (${collections.length}):`, collections.map(c => c.name).join(', ') || 'None yet');
+  
+  // Check if models are registered
+  const models = Object.keys(mongoose.models);
+  console.log(`🗂️  Models Registered (${models.length}):`, models.join(', ') || 'Loading...');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+})
+.catch((err) => {
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.error('❌ MongoDB Connection Failed!');
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.error('Error:', err.message);
+  console.error('Please ensure:');
+  console.error('  1. MongoDB service is running: net start MongoDB');
+  console.error('  2. Connection string is correct in .env');
+  console.error('  3. Database name is valid');
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  process.exit(1);
+});
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/food', foodRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/coupons', couponRoutes);
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'AR Food Backend is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ 
+    success: false, 
+    message: 'Something went wrong!',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🚀 AR Food Backend Server Started!');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('🌐 Server URL: http://localhost:' + PORT);
+  console.log('📡 API Base: http://localhost:' + PORT + '/api');
+  console.log('❤️  Health Check: http://localhost:' + PORT + '/api/health');
+  console.log('📱 Admin Phone: ' + process.env.ADMIN_PHONES);
+  console.log('🔧 Environment: ' + (process.env.NODE_ENV || 'development'));
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('✨ Server is ready to accept requests!');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+});

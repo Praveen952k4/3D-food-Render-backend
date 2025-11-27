@@ -7,7 +7,7 @@ const foodItemSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['Starters', 'Tandoori', 'Indian', 'Special Platter', 'Biryani', 'Fast Food', 'Desserts', 'Beverages'],
+    enum: ['Starters', 'Tandoori', 'Indian', 'Special Platter', 'Biryani', 'Fast Food', 'Cake', 'Desserts', 'Beverages'],
     required: true,
   },
   price: {

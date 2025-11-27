@@ -33,6 +33,15 @@ const orderSchema = new mongoose.Schema({
     price: Number,
     quantity: Number,
     subtotal: Number,
+    customizations: [{
+      spiceLevel: {
+        type: String,
+        enum: ['mild', 'medium', 'spicy', 'extra-spicy'],
+        default: 'medium',
+      },
+      extras: [String],
+      specialInstructions: String,
+    }],
   }],
   subtotal: {
     type: Number,

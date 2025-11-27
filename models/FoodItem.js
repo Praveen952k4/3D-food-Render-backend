@@ -34,6 +34,11 @@ const foodItemSchema = new mongoose.Schema({
     name: String,
     quantity: String,
   }],
+  calories: {
+    type: Number,
+    required: true,
+    default: 0,
+  },
   isVeg: {
     type: Boolean,
     default: true,

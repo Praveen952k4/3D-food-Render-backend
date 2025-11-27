@@ -64,10 +64,54 @@ router.put('/orders/:id', async (req, res) => {
       });
     }
 
-    if (status) order.status = status;
-    if (paymentStatus) order.paymentStatus = paymentStatus;
+    const previousStatus = order.status;
+    let statusChanged = false;
+    let paymentStatusChanged = false;
+
+    // Update status and add to history
+    if (status && status !== order.status) {
+      console.log(`📝 Admin updating order ${order.orderNumber} status: ${order.status} → ${status}`);
+      order.status = status;
+      order.statusHistory.push({
+        status: status,
+        timestamp: new Date(),
+        updatedBy: 'admin',
+      });
+      statusChanged = true;
+    }
+    
+    if (paymentStatus && paymentStatus !== order.paymentStatus) {
+      console.log(`💳 Admin updating order ${order.orderNumber} payment status: ${order.paymentStatus} → ${paymentStatus}`);
+      order.paymentStatus = paymentStatus;
+      paymentStatusChanged = true;
+    }
 
     await order.save();
+    
+    console.log(`✅ Order ${order.orderNumber} updated successfully`);
+
+    // Emit socket event for real-time notification to customer (only for status changes)
+    const io = req.app.get('io');
+    if (io && statusChanged) {
+      const populatedOrder = await Order.findById(order._id).populate('items.foodId');
+      io.to(`user_${order.userId}`).emit('orderUpdate', {
+        type: 'statusChange',
+        order: {
+          _id: populatedOrder._id,
+          orderNumber: populatedOrder.orderNumber,
+          status: populatedOrder.status,
+          statusHistory: populatedOrder.statusHistory,
+          grandTotal: populatedOrder.grandTotal,
+          items: populatedOrder.items,
+          createdAt: populatedOrder.createdAt,
+          updatedAt: populatedOrder.updatedAt
+        },
+        previousStatus: previousStatus,
+        newStatus: status,
+        message: `Order ${order.orderNumber} status updated to ${status}`
+      });
+      console.log(`🔔 Socket notification sent to user ${order.userId} for order ${order.orderNumber}`);
+    }
 
     res.json({ 
       success: true, 
@@ -76,9 +120,15 @@ router.put('/orders/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('Update order error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to update order' 
+      message: 'Failed to update order',
+      error: error.message
     });
   }
 });

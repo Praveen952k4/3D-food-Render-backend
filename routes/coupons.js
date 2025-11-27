@@ -6,29 +6,91 @@ const { authenticate, isAdmin } = require('../middleware/auth');
 // Apply authentication to all routes
 router.use(authenticate);
 
+// GET /api/coupons/available - Get available coupons for customers
+router.get('/available', async (req, res) => {
+  try {
+    const now = new Date();
+    const coupons = await Coupon.find({
+      isActive: true,
+      validFrom: { $lte: now },
+      validUntil: { $gte: now },
+    })
+    .select('code description discountType discountValue minOrderValue maxDiscount')
+    .sort({ createdAt: -1 });
+
+    // Filter out coupons that have reached usage limit
+    const availableCoupons = coupons.filter(coupon => {
+      return !coupon.usageLimit || coupon.usedCount < coupon.usageLimit;
+    });
+
+    res.json({
+      success: true,
+      coupons: availableCoupons
+    });
+  } catch (error) {
+    console.error('Get available coupons error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch available coupons'
+    });
+  }
+});
+
 // GET /api/coupons/validate/:code - Validate and get coupon details (Customer)
 router.get('/validate/:code', async (req, res) => {
   try {
     const { code } = req.params;
     const { orderValue } = req.query;
 
+    console.log('🎟️ Validating coupon:', code, 'for order value:', orderValue);
+
     const coupon = await Coupon.findOne({ code: code.toUpperCase() });
 
     if (!coupon) {
+      console.log('❌ Coupon not found:', code);
       return res.status(404).json({
         success: false,
         message: 'Invalid coupon code'
       });
     }
 
+    console.log('📋 Coupon found:', {
+      code: coupon.code,
+      isActive: coupon.isActive,
+      validFrom: coupon.validFrom,
+      validUntil: coupon.validUntil,
+      usageLimit: coupon.usageLimit,
+      usedCount: coupon.usedCount,
+      minOrderValue: coupon.minOrderValue,
+    });
+
+    const now = new Date();
+    console.log('⏰ Current time:', now);
+    console.log('⏰ Valid from:', coupon.validFrom, '(is valid:', coupon.validFrom <= now, ')');
+    console.log('⏰ Valid until:', coupon.validUntil, '(is valid:', coupon.validUntil >= now, ')');
+    console.log('🔢 Usage:', coupon.usedCount, '/', coupon.usageLimit || 'unlimited');
+    console.log('✅ Is active:', coupon.isActive);
+
     if (!coupon.isValid()) {
+      console.log('❌ Coupon validation failed');
+      
+      let reason = '';
+      if (!coupon.isActive) reason = 'Coupon is inactive';
+      else if (coupon.validFrom > now) reason = 'Coupon is not yet active';
+      else if (coupon.validUntil < now) reason = 'Coupon has expired';
+      else if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) reason = 'Coupon usage limit reached';
+      
+      console.log('❌ Reason:', reason);
+      
       return res.status(400).json({
         success: false,
-        message: 'This coupon is not valid or has expired'
+        message: reason || 'This coupon is not valid or has expired'
       });
     }
 
     const discount = orderValue ? coupon.calculateDiscount(parseFloat(orderValue)) : 0;
+    
+    console.log('✅ Coupon is valid, discount:', discount);
 
     res.json({
       success: true,

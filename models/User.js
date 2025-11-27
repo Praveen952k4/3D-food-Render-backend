@@ -17,7 +17,7 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['customer', 'admin'],
+    enum: ['customer', 'admin', 'chef'],
     default: 'customer',
   },
   otp: {
@@ -54,11 +54,15 @@ const userSchema = new mongoose.Schema({
   },
 });
 
-// Auto-assign admin role based on phone number
+// Auto-assign admin/chef role based on phone number
 userSchema.pre('save', function(next) {
   const adminPhones = process.env.ADMIN_PHONES?.split(',') || [];
+  const chefPhones = process.env.CHEF_PHONES?.split(',') || ['9999999999']; // Default chef phone
+  
   if (adminPhones.includes(this.phone)) {
     this.role = 'admin';
+  } else if (chefPhones.includes(this.phone)) {
+    this.role = 'chef';
   }
   next();
 });

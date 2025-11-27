@@ -80,9 +80,23 @@ const orderSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled'],
     default: 'pending',
   },
+  statusHistory: [{
+    status: {
+      type: String,
+      enum: ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled'],
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedBy: {
+      type: String,
+      default: 'system',
+    },
+  }],
   paymentStatus: {
     type: String,
-    enum: ['pending', 'success', 'failed'],
+    enum: ['pending', 'incomplete', 'completed', 'success', 'failed'],
     default: 'pending',
   },
   paymentMethod: {
@@ -99,6 +113,15 @@ const orderSchema = new mongoose.Schema({
     default: '',
   },
   // Customer feedback fields
+  hasFeedback: {
+    type: Boolean,
+    default: false,
+  },
+  feedbackId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Feedback',
+    default: null,
+  },
   customerFeedback: {
     type: String,
     default: '',
@@ -131,6 +154,15 @@ const orderSchema = new mongoose.Schema({
 // Generate unique order number
 orderSchema.pre('save', async function(next) {
   this.updatedAt = Date.now();
+  
+  // Initialize statusHistory if it doesn't exist
+  if (!this.statusHistory || this.statusHistory.length === 0) {
+    this.statusHistory = [{
+      status: this.status || 'pending',
+      timestamp: new Date(),
+      updatedBy: 'system',
+    }];
+  }
   
   if (!this.orderNumber) {
     const date = new Date();

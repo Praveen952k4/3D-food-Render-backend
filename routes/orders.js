@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
+const Coupon = require('../models/Coupon');
 const { authenticate } = require('../middleware/auth');
 
 // GET /api/orders - Get user orders
@@ -36,6 +37,8 @@ router.post('/', authenticate, async (req, res) => {
       subtotal,
       tax,
       discount,
+      couponCode,
+      couponDiscount,
       grandTotal,
       tableNumber,
       comment,
@@ -77,6 +80,41 @@ router.post('/', authenticate, async (req, res) => {
       });
     }
 
+    // Validate and increment coupon usage if provided
+    if (couponCode && couponCode.trim() !== '') {
+      console.log('🎟️ Validating coupon:', couponCode);
+      const coupon = await Coupon.findOne({ code: couponCode.toUpperCase() });
+      
+      if (!coupon) {
+        console.error('❌ Invalid coupon code');
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid coupon code'
+        });
+      }
+
+      if (!coupon.isValid()) {
+        console.error('❌ Coupon is not valid or expired');
+        return res.status(400).json({
+          success: false,
+          message: 'This coupon is not valid or has expired'
+        });
+      }
+
+      if (subtotal < coupon.minOrderValue) {
+        console.error('❌ Order value below minimum required');
+        return res.status(400).json({
+          success: false,
+          message: `Minimum order value of ₹${coupon.minOrderValue} required for this coupon`
+        });
+      }
+
+      // Increment usage count
+      coupon.usedCount += 1;
+      await coupon.save();
+      console.log(`✅ Coupon ${couponCode} applied, usage count: ${coupon.usedCount}`);
+    }
+
     console.log('✅ All validations passed, creating order...');
     
     const order = new Order({
@@ -88,16 +126,41 @@ router.post('/', authenticate, async (req, res) => {
       subtotal,
       tax: tax || 0,
       discount: discount || 0,
+      couponCode: couponCode || '',
+      couponDiscount: couponDiscount || 0,
       grandTotal,
       tableNumber: orderType === 'dine-in' ? tableNumber : '',
       comment,
       paymentMethod: paymentMethod || 'cash',
       status: 'pending',
       paymentStatus: 'pending',
+      statusHistory: [{
+        status: 'pending',
+        timestamp: new Date(),
+        updatedBy: 'customer',
+      }],
     });
 
     await order.save();
     console.log('✅ Order saved successfully:', order.orderNumber);
+
+    // Emit socket event for real-time notification
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${req.user.id}`).emit('orderUpdate', {
+        type: 'created',
+        order: {
+          _id: order._id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          grandTotal: order.grandTotal,
+          items: order.items,
+          createdAt: order.createdAt
+        },
+        message: `Order ${order.orderNumber} placed successfully!`
+      });
+      console.log('🔔 Socket notification sent to user:', req.user.id);
+    }
 
     res.json({ 
       success: true, 
@@ -124,6 +187,97 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
+// GET /api/orders/active/notifications - Get active orders for notifications
+router.get('/active/notifications', authenticate, async (req, res) => {
+  try {
+    console.log('🔍 Fetching active orders for user:', req.user.id);
+    console.log('👤 User object:', JSON.stringify(req.user, null, 2));
+    console.log('🔑 UserId type:', typeof req.user.id);
+    
+    // First, let's see ALL orders for this user
+    const allUserOrders = await Order.find({ userId: req.user.id });
+    console.log(`📊 Total orders for user: ${allUserOrders.length}`);
+    
+    if (allUserOrders.length > 0) {
+      console.log('📋 Order statuses:', allUserOrders.map(o => ({ 
+        orderNumber: o.orderNumber, 
+        status: o.status,
+        userId: o.userId?.toString(),
+        created: o.createdAt
+      })));
+    } else {
+      // Try to find ANY recent orders to help debug
+      const recentOrders = await Order.find().sort({ createdAt: -1 }).limit(3);
+      console.log('🔍 Recent orders in DB:', recentOrders.map(o => ({
+        orderNumber: o.orderNumber,
+        userId: o.userId?.toString(),
+        status: o.status
+      })));
+    }
+    
+    const orders = await Order.find({ 
+      userId: req.user.id,
+      status: { $in: ['pending', 'confirmed', 'preparing', 'ready', 'delivered'] }
+    })
+    .populate('items.foodId')
+    .sort({ createdAt: -1 });
+
+    // Filter out delivered orders that already have feedback
+    const activeOrders = orders.filter(order => {
+      if (order.status === 'delivered') {
+        // Only include delivered orders without feedback (for 1 polling cycle)
+        return !order.hasFeedback;
+      }
+      return true;
+    });
+
+    console.log(`✅ Active orders found: ${activeOrders.length}`);
+    if (activeOrders.length > 0) {
+      console.log('📦 Active orders:', activeOrders.map(o => ({ 
+        orderNumber: o.orderNumber, 
+        status: o.status,
+        hasFeedback: o.hasFeedback
+      })));
+    }
+    
+    res.json({ 
+      success: true, 
+      orders: activeOrders
+    });
+  } catch (error) {
+    console.error('❌ Get active orders error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch active orders' 
+    });
+  }
+});
+
+// GET /api/orders/history/:phone - Get order history by phone number
+router.get('/history/:phone', authenticate, async (req, res) => {
+  try {
+    const { phone } = req.params;
+    
+    const orders = await Order.find({ 
+      customerPhone: phone 
+    })
+    .populate('items.foodId')
+    .sort({ createdAt: -1 });
+
+    res.json({ 
+      success: true, 
+      orders,
+      count: orders.length
+    });
+  } catch (error) {
+    console.error('Get order history error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch order history' 
+    });
+  }
+});
+
 // PUT /api/orders/:id - Update order status
 router.put('/:id', authenticate, async (req, res) => {
   try {
@@ -138,7 +292,14 @@ router.put('/:id', authenticate, async (req, res) => {
       });
     }
 
-    if (status) order.status = status;
+    if (status && status !== order.status) {
+      order.status = status;
+      order.statusHistory.push({
+        status: status,
+        timestamp: new Date(),
+        updatedBy: req.user.role || 'admin',
+      });
+    }
     if (paymentStatus) order.paymentStatus = paymentStatus;
     if (paymentId) order.paymentId = paymentId;
 
@@ -181,31 +342,6 @@ router.get('/:id', authenticate, async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Failed to fetch order' 
-    });
-  }
-});
-
-// GET /api/orders/history/:phone - Get order history by phone number
-router.get('/history/:phone', authenticate, async (req, res) => {
-  try {
-    const { phone } = req.params;
-    
-    const orders = await Order.find({ 
-      customerPhone: phone 
-    })
-    .populate('items.foodId')
-    .sort({ createdAt: -1 });
-
-    res.json({ 
-      success: true, 
-      orders,
-      count: orders.length
-    });
-  } catch (error) {
-    console.error('Get order history error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch order history' 
     });
   }
 });

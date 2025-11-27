@@ -22,7 +22,7 @@ router.get('/dashboard', async (req, res) => {
     });
 
     const todayRevenue = todayOrders
-      .filter(order => order.paymentStatus === 'success')
+      .filter(order => order.paymentStatus === 'success' || order.paymentStatus === 'completed')
       .reduce((sum, order) => sum + order.grandTotal, 0);
 
     // This month's stats
@@ -34,13 +34,13 @@ router.get('/dashboard', async (req, res) => {
     });
 
     const monthRevenue = monthOrders
-      .filter(order => order.paymentStatus === 'success')
+      .filter(order => order.paymentStatus === 'success' || order.paymentStatus === 'completed')
       .reduce((sum, order) => sum + order.grandTotal, 0);
 
     // Overall stats
     const totalOrders = await Order.countDocuments();
     const totalRevenue = await Order.aggregate([
-      { $match: { paymentStatus: 'success' } },
+      { $match: { paymentStatus: { $in: ['success', 'completed'] } } },
       { $group: { _id: null, total: { $sum: '$grandTotal' } } },
     ]);
 
@@ -55,12 +55,12 @@ router.get('/dashboard', async (req, res) => {
         today: {
           orders: todayOrders.length,
           revenue: todayRevenue,
-          successfulOrders: todayOrders.filter(o => o.paymentStatus === 'success').length,
+          successfulOrders: todayOrders.filter(o => o.paymentStatus === 'success' || o.paymentStatus === 'completed').length,
         },
         month: {
           orders: monthOrders.length,
           revenue: monthRevenue,
-          successfulOrders: monthOrders.filter(o => o.paymentStatus === 'success').length,
+          successfulOrders: monthOrders.filter(o => o.paymentStatus === 'success' || o.paymentStatus === 'completed').length,
         },
         overall: {
           totalOrders,
@@ -98,7 +98,7 @@ router.get('/daily-report', async (req, res) => {
 
     // Calculate stats
     const totalOrders = orders.length;
-    const successfulOrders = orders.filter(o => o.paymentStatus === 'success');
+    const successfulOrders = orders.filter(o => o.paymentStatus === 'success' || o.paymentStatus === 'completed');
     const revenue = successfulOrders.reduce((sum, order) => sum + order.grandTotal, 0);
     const avgOrderValue = successfulOrders.length > 0 ? revenue / successfulOrders.length : 0;
 
@@ -134,6 +134,8 @@ router.get('/daily-report', async (req, res) => {
         date: startDate.toISOString().split('T')[0],
         totalOrders,
         successfulOrders: successfulOrders.length,
+        pendingOrders: orders.filter(o => o.paymentStatus === 'pending').length,
+        incompleteOrders: orders.filter(o => o.paymentStatus === 'incomplete').length,
         failedOrders: orders.filter(o => o.paymentStatus === 'failed').length,
         revenue,
         avgOrderValue,
@@ -168,7 +170,7 @@ router.get('/monthly-report', async (req, res) => {
 
     // Calculate stats
     const totalOrders = orders.length;
-    const successfulOrders = orders.filter(o => o.paymentStatus === 'success');
+    const successfulOrders = orders.filter(o => o.paymentStatus === 'success' || o.paymentStatus === 'completed');
     const revenue = successfulOrders.reduce((sum, order) => sum + order.grandTotal, 0);
     const avgOrderValue = successfulOrders.length > 0 ? revenue / successfulOrders.length : 0;
 
@@ -220,6 +222,8 @@ router.get('/monthly-report', async (req, res) => {
         monthName: startDate.toLocaleString('default', { month: 'long' }),
         totalOrders,
         successfulOrders: successfulOrders.length,
+        pendingOrders: orders.filter(o => o.paymentStatus === 'pending').length,
+        incompleteOrders: orders.filter(o => o.paymentStatus === 'incomplete').length,
         failedOrders: orders.filter(o => o.paymentStatus === 'failed').length,
         revenue,
         avgOrderValue,

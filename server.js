@@ -3,6 +3,8 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
+const http = require('http');
+const socketIo = require('socket.io');
 
 // Load environment variables
 dotenv.config();
@@ -12,10 +14,41 @@ const authRoutes = require('./routes/auth');
 const orderRoutes = require('./routes/orders');
 const foodRoutes = require('./routes/food');
 const adminRoutes = require('./routes/admin');
+const chefRoutes = require('./routes/chef');
 const analyticsRoutes = require('./routes/analytics');
 const couponRoutes = require('./routes/coupons');
+const feedbackRoutes = require('./routes/feedback');
+const itemFeedbackRoutes = require('./routes/itemFeedback');
 
 const app = express();
+const server = http.createServer(app);
+
+// Configure Socket.IO with CORS
+const io = socketIo(server, {
+  cors: {
+    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// Make io accessible to routes
+app.set('io', io);
+
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log('🔌 New client connected:', socket.id);
+  
+  // User joins their personal room for notifications
+  socket.on('join', (userId) => {
+    socket.join(`user_${userId}`);
+    console.log(`👤 User ${userId} joined their notification room`);
+  });
+  
+  socket.on('disconnect', () => {
+    console.log('🔌 Client disconnected:', socket.id);
+  });
+});
 
 // Enhanced CORS configuration
 const allowedOrigins = [
@@ -108,8 +141,11 @@ app.use('/api/auth', authRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/food', foodRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/chef', chefRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/coupons', couponRoutes);
+app.use('/api/feedback', feedbackRoutes);
+app.use('/api/item-feedback', itemFeedbackRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -132,12 +168,13 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🚀 AR Food Backend Server Started!');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🌐 Server URL: http://localhost:' + PORT);
   console.log('📡 API Base: http://localhost:' + PORT + '/api');
+  console.log('🔌 Socket.IO: http://localhost:' + PORT);
   console.log('❤️  Health Check: http://localhost:' + PORT + '/api/health');
   console.log('📱 Admin Phone: ' + process.env.ADMIN_PHONES);
   console.log('🔧 Environment: ' + (process.env.NODE_ENV || 'development'));

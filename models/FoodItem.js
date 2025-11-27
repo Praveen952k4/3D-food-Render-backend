@@ -61,6 +61,10 @@ const foodItemSchema = new mongoose.Schema({
       ref: 'User',
       required: true,
     },
+    orderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Order',
+    },
     rating: {
       type: Number,
       required: true,

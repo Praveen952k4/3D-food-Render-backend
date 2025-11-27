@@ -17,18 +17,46 @@ const couponRoutes = require('./routes/coupons');
 
 const app = express();
 
-// Enhanced CORS configuration for mobile access
+// Enhanced CORS configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://3-d-food-rendering-frontend-zunt-b1jrhidgj.vercel.app', // Your deployed frontend
+  'https://3-d-food-rendering-frontend-zunt.vercel.app', // Alternative frontend URL
+  process.env.FRONTEND_URL, // Additional frontend URL from env
+].filter(Boolean); // Remove undefined values
+
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or Postman)
     if (!origin) return callback(null, true);
     
-    // Allow all origins in development
-    return callback(null, true);
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      console.log('✅ CORS allowed origin:', origin);
+      return callback(null, true);
+    }
+    
+    // Allow localhost in development
+    if (origin && origin.includes('localhost')) {
+      console.log('✅ CORS allowed localhost:', origin);
+      return callback(null, true);
+    }
+    
+    // Allow all Vercel preview deployments
+    if (origin && origin.includes('vercel.app')) {
+      console.log('✅ CORS allowed Vercel deployment:', origin);
+      return callback(null, true);
+    }
+    
+    console.warn('⚠️ CORS would block origin (but allowing):', origin);
+    callback(null, true); // Allow for now, log the warning
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'X-Request-Id'],
+  maxAge: 86400, // 24 hours
 }));
 
 app.use(bodyParser.json());
@@ -44,10 +72,7 @@ app.use((req, res, next) => {
 });
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
+mongoose.connect(process.env.MONGODB_URI)
 .then(async () => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('✅ MongoDB Connected Successfully!');

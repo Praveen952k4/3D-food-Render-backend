@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, isKitchen } = require('../middleware/auth');
 
 // Get orders for chef - show all orders except cancelled/delivered
-router.get('/orders', authenticate, async (req, res) => {
+router.get('/orders', authenticate, isKitchen, async (req, res) => {
   try {
     // Check if user is chef or admin
     if (req.user.role !== 'chef' && req.user.role !== 'admin') {
@@ -43,7 +43,7 @@ router.get('/orders', authenticate, async (req, res) => {
 });
 
 // Update order status (chef can move orders through preparation stages)
-router.patch('/orders/:orderId/status', authenticate, async (req, res) => {
+router.patch('/orders/:orderId/status', authenticate, isKitchen, async (req, res) => {
   try {
     // Check if user is chef or admin
     if (req.user.role !== 'chef' && req.user.role !== 'admin') {
@@ -116,7 +116,7 @@ router.patch('/orders/:orderId/status', authenticate, async (req, res) => {
 });
 
 // Get order details by ID
-router.get('/orders/:orderId', authenticate, async (req, res) => {
+router.get('/orders/:orderId', authenticate, isKitchen, async (req, res) => {
   try {
     // Check if user is chef or admin
     if (req.user.role !== 'chef' && req.user.role !== 'admin') {
@@ -138,7 +138,7 @@ router.get('/orders/:orderId', authenticate, async (req, res) => {
 });
 
 // Mark order as delivered (simple one-click action)
-router.put('/orders/:id/deliver', authenticate, async (req, res) => {
+router.put('/orders/:id/deliver', authenticate, isKitchen, async (req, res) => {
   try {
     // Check if user is chef or admin
     if (req.user.role !== 'chef' && req.user.role !== 'admin') {
@@ -206,7 +206,7 @@ router.put('/orders/:id/deliver', authenticate, async (req, res) => {
 });
 
 // Get chef statistics
-router.get('/stats', authenticate, async (req, res) => {
+router.get('/stats', authenticate, isKitchen, async (req, res) => {
   try {
     // Check if user is chef or admin
     if (req.user.role !== 'chef' && req.user.role !== 'admin') {

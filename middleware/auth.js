@@ -49,20 +49,30 @@ const authenticate = (req, res, next) => {
   }
 };
 
-// Admin authorization middleware
-const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ 
-      success: false, 
-      message: 'Access denied. Admin only.' 
+// Role authorization. The role comes from the signed token, which is issued
+// from the user's stored role, so a customer cannot reach a staff route by
+// asking for one.
+const requireRole = (...roles) => (req, res, next) => {
+  if (!roles.includes(req.user?.role)) {
+    return res.status(403).json({
+      success: false,
+      message: `Access denied. ${roles.join(' or ')} only.`,
     });
   }
   next();
 };
 
+const isAdmin = requireRole('admin');
+const isChef = requireRole('chef');
+// The kitchen board is also useful to an admin.
+const isKitchen = requireRole('chef', 'admin');
+
 module.exports = {
   generateToken,
   verifyToken,
   authenticate,
+  requireRole,
   isAdmin,
+  isChef,
+  isKitchen,
 };

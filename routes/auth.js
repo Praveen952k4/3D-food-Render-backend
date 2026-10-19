@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const Table = require('../models/Table');
 const { generateToken } = require('../middleware/auth');
 
 // Generate OTP (using dummy OTP for development)
@@ -127,6 +128,17 @@ router.post('/verify-otp', async (req, res) => {
       });
     }
 
+    // This is the customer door. Admins share it, because they sign in with a
+    // phone number too; kitchen staff and guests have their own.
+    if (!['customer', 'admin'].includes(user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: user.role === 'chef'
+          ? 'Kitchen staff sign in with a staff ID and password.'
+          : 'Guests sign in with their table number.',
+      });
+    }
+
     // Update user
     user.isVerified = true;
     user.lastLogin = new Date();
@@ -210,6 +222,153 @@ router.post('/update-profile', async (req, res) => {
       success: false, 
       message: 'Failed to update profile' 
     });
+  }
+});
+
+// --------------------------------------------------------------------------
+// Role-scoped sign-in
+//
+// Each door checks the role recorded on the user, so staff cannot come in
+// through the customer door and vice versa. Admins share the customer door,
+// because they sign in with a phone number too.
+// --------------------------------------------------------------------------
+
+const recordLogin = (user, req) => {
+  user.lastLogin = new Date();
+  user.isOnline = true;
+  user.loginHistory.push({
+    timestamp: new Date(),
+    ipAddress: req.ip || req.connection?.remoteAddress,
+    userAgent: req.get('user-agent') || 'Unknown',
+  });
+  if (user.loginHistory.length > 50) {
+    user.loginHistory = user.loginHistory.slice(-50);
+  }
+};
+
+const publicUser = (user) => ({
+  id: user._id,
+  phone: user.phone,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  staffId: user.staffId,
+  tableNumber: user.tableNumber,
+});
+
+// POST /api/auth/guest/login - sign in by table number, no account needed
+router.post('/guest/login', async (req, res) => {
+  try {
+    const tableNumber = String(req.body.tableNumber ?? '').trim();
+    const name = String(req.body.name ?? '').trim();
+
+    if (!tableNumber) {
+      return res.status(400).json({ success: false, message: 'Please enter your table number.' });
+    }
+
+    // The table is validated against the tables collection, so a guess at a
+    // number that does not exist is refused.
+    const table = await Table.findOne({ number: tableNumber });
+
+    if (!table) {
+      return res.status(404).json({
+        success: false,
+        message: `Table ${tableNumber} is not one of ours. Check the number on the table card.`,
+      });
+    }
+
+    if (!table.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: `Table ${tableNumber} is not in service right now. Please ask a member of staff.`,
+      });
+    }
+
+    // One record per guest session, keyed by a generated id in the phone
+    // field so everything downstream that looks a customer up by phone keeps
+    // working. It is never a real phone number.
+    const sessionId = `GUEST-T${tableNumber}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+
+    const guest = new User({
+      phone: sessionId,
+      name: name || `Table ${tableNumber} guest`,
+      role: 'guest',
+      tableNumber,
+      isVerified: true,
+    });
+    recordLogin(guest, req);
+    await guest.save();
+
+    const token = generateToken(guest._id, guest.phone, guest.role);
+
+    console.log(`🪑 Guest signed in at table ${tableNumber} (${guest.name})`);
+
+    res.json({
+      success: true,
+      message: `Welcome to table ${tableNumber}`,
+      token,
+      user: publicUser(guest),
+      table: { number: table.number, label: table.label, seats: table.seats },
+    });
+  } catch (error) {
+    console.error('Guest login error:', error);
+    res.status(500).json({ success: false, message: 'Could not start your guest session.' });
+  }
+});
+
+// POST /api/auth/staff/login - staff ID + password, for the kitchen
+router.post('/staff/login', async (req, res) => {
+  try {
+    const staffId = String(req.body.staffId ?? '').trim().toLowerCase();
+    const password = String(req.body.password ?? '');
+
+    if (!staffId || !password) {
+      return res.status(400).json({ success: false, message: 'Staff ID and password are both required.' });
+    }
+
+    // passwordHash is select:false on the schema, so ask for it explicitly.
+    const user = await User.findOne({ staffId }).select('+passwordHash');
+
+    // One message for a wrong ID and a wrong password, so this cannot be used
+    // to find out which staff IDs exist.
+    const invalid = { success: false, message: 'That staff ID and password do not match.' };
+
+    if (!user) return res.status(401).json(invalid);
+    if (!(await user.verifyPassword(password))) return res.status(401).json(invalid);
+
+    if (!['chef', 'admin'].includes(user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'This sign-in is for kitchen staff. Please use the customer sign-in.',
+      });
+    }
+
+    if (user.isActive === false) {
+      return res.status(403).json({ success: false, message: 'This staff account has been deactivated.' });
+    }
+
+    recordLogin(user, req);
+    await user.save();
+
+    const token = generateToken(user._id, user.phone, user.role);
+
+    console.log(`👨‍🍳 Staff signed in: ${user.staffId} (${user.role})`);
+
+    res.json({ success: true, message: 'Signed in', token, user: publicUser(user) });
+  } catch (error) {
+    console.error('Staff login error:', error);
+    res.status(500).json({ success: false, message: 'Sign-in failed.' });
+  }
+});
+
+// GET /api/auth/tables - the table numbers a guest can choose from
+router.get('/tables', async (req, res) => {
+  try {
+    const tables = await Table.find({ isActive: true }).sort({ number: 1 }).select('number label seats');
+    res.json({ success: true, tables });
+  } catch (error) {
+    console.error('Get tables error:', error);
+    res.status(500).json({ success: false, message: 'Could not load the table list.' });
   }
 });
 

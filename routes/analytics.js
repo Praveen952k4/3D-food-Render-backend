@@ -481,6 +481,8 @@ router.get('/gst-summary', async (req, res) => {
           tableNumber: order.tableNumber,
           paymentMethod: order.paymentMethod,
           paymentStatus: order.paymentStatus,
+          receiptSent: order.receiptSent,
+          receiptSentAt: order.receiptSentAt,
           couponCode: order.couponCode,
           couponDiscount: order.couponDiscount,
           discount: order.discount,

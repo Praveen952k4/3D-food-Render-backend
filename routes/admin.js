@@ -377,4 +377,50 @@ router.get('/feedback-summary', async (req, res) => {
   }
 });
 
+// PUT /api/admin/orders/:id/send-receipt
+// Release the e-receipt to the customer. Until an admin does this the
+// customer's order history shows no receipt to view or download.
+router.put('/orders/:id/send-receipt', async (req, res) => {
+  try {
+    const { send = true } = req.body;
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    order.receiptSent = Boolean(send);
+    order.receiptSentAt = order.receiptSent ? new Date() : null;
+    await order.save();
+
+    // Tell the customer's session so the receipt appears without a reload.
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${order.userId}`).emit('orderUpdate', {
+        type: 'receiptSent',
+        order: {
+          _id: order._id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          grandTotal: order.grandTotal,
+          receiptSent: order.receiptSent,
+          receiptSentAt: order.receiptSentAt,
+        },
+        message: order.receiptSent
+          ? `Your e-receipt for ${order.orderNumber} is ready`
+          : `The e-receipt for ${order.orderNumber} was withdrawn`,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: order.receiptSent ? 'Receipt sent to the customer' : 'Receipt withdrawn',
+      order,
+    });
+  } catch (error) {
+    console.error('Send receipt error:', error);
+    res.status(500).json({ success: false, message: 'Failed to send the receipt' });
+  }
+});
+
 module.exports = router;

@@ -141,6 +141,16 @@ const orderSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  // The e-receipt is released by the admin; until then the customer cannot
+  // view or download it.
+  receiptSent: {
+    type: Boolean,
+    default: false,
+  },
+  receiptSentAt: {
+    type: Date,
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

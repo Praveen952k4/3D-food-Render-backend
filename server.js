@@ -11,6 +11,7 @@ dotenv.config();
 
 // Import routes
 const authRoutes = require('./routes/auth');
+const bookingRoutes = require('./routes/bookings');
 const orderRoutes = require('./routes/orders');
 const foodRoutes = require('./routes/food');
 const adminRoutes = require('./routes/admin');
@@ -138,6 +139,7 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/bookings', bookingRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/food', foodRoutes);
 app.use('/api/admin', adminRoutes);

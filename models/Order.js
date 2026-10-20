@@ -81,6 +81,13 @@ const orderSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  // Set when this order came from a booking's pre-order, so a served order can
+  // be traced back to the reservation that produced it.
+  bookingId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Booking',
+    default: null,
+  },
   comment: {
     type: String,
     default: '',

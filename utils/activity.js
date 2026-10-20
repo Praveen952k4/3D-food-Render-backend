@@ -95,6 +95,32 @@ const orderTimeline = (order) => {
   };
 };
 
+/** A booking's own stages, in the same words the timeline uses for orders. */
+const BOOKING_STAGE = {
+  reserved: 'Table reserved in advance',
+  seated: 'Guest checked in',
+  completed: 'Visit completed',
+  cancelled: 'Booking cancelled',
+  'no-show': 'Booking marked no-show',
+};
+
+/** One timeline event for a booking, shaped like an order's. */
+const bookingEvent = (booking, stage) => ({
+  id: `booking-${booking._id}-${stage}`,
+  key: stage === 'seated' ? 'guest-checked-in' : 'table-reserved',
+  label: BOOKING_STAGE[stage] || 'Booking updated',
+  at: stage === 'seated' ? booking.checkedInAt || new Date() : new Date(),
+  tableNumber: booking.tableNumber || '',
+  customerName: booking.customerName || 'Guest',
+  orderNumber: '',
+  orderId: booking.orderId || null,
+  by: 'customer',
+  scheduledFor: booking.scheduledFor,
+  partySize: booking.partySize,
+  estimatedPrepMinutes: booking.estimatedPrepMinutes || 0,
+  itemCount: (booking.preOrderItems || []).reduce((sum, item) => sum + (item.quantity || 0), 0),
+});
+
 /**
  * Push one event to every admin screen that is open. Admins join no room, so
  * this goes to all sockets; only the admin dashboard listens for it.
@@ -149,6 +175,8 @@ const releaseTableForOrder = async (Table, order, io) => {
 
 module.exports = {
   STAGE,
+  BOOKING_STAGE,
+  bookingEvent,
   seatingEvent,
   orderEvents,
   orderTimeline,

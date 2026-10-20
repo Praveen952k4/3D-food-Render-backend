@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 const Coupon = require('../models/Coupon');
+const FoodItem = require('../models/FoodItem');
 const { authenticate } = require('../middleware/auth');
+const { orderEvents, emitActivity } = require('../utils/activity');
 
 // GET /api/orders - Get user orders
 router.get('/', authenticate, async (req, res) => {
@@ -116,13 +118,31 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     console.log('✅ All validations passed, creating order...');
-    
+
+    // Stamp each line with the kitchen's current time for that dish, so the
+    // customer's estimate is fixed at the moment they ordered. The order's own
+    // estimate is the longest dish, because the kitchen cooks in parallel.
+    const foodIds = items.map((item) => item.foodId).filter(Boolean);
+    const dishes = foodIds.length ? await FoodItem.find({ _id: { $in: foodIds } }).select('prepTimeMinutes') : [];
+    const prepTimeById = new Map(dishes.map((dish) => [String(dish._id), dish.prepTimeMinutes ?? 15]));
+
+    const itemsWithPrepTime = items.map((item) => ({
+      ...item,
+      prepTimeMinutes: item.prepTimeMinutes ?? prepTimeById.get(String(item.foodId)) ?? 15,
+    }));
+
+    const estimatedPrepMinutes = itemsWithPrepTime.reduce(
+      (longest, item) => Math.max(longest, item.prepTimeMinutes || 0),
+      0
+    );
+
     const order = new Order({
       userId: req.user.id,
       customerPhone,
       customerName,
       orderType,
-      items,
+      items: itemsWithPrepTime,
+      estimatedPrepMinutes,
       subtotal,
       tax: tax || 0,
       discount: discount || 0,
@@ -161,6 +181,10 @@ router.post('/', authenticate, async (req, res) => {
       });
       console.log('🔔 Socket notification sent to user:', req.user.id);
     }
+
+    // Tell the admin dashboard a table has just ordered, so the service
+    // timeline fills in without waiting for a refresh.
+    emitActivity(io, orderEvents(order).slice(-1)[0]);
 
     res.json({ 
       success: true, 

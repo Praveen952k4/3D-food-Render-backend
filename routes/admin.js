@@ -4,6 +4,7 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const FoodItem = require('../models/FoodItem');
 const { authenticate, isAdmin } = require('../middleware/auth');
+const { seatingEvent, orderEvents, orderTimeline } = require('../utils/activity');
 
 // Apply authentication and admin check to all routes
 router.use(authenticate);
@@ -193,6 +194,64 @@ router.get('/users/login-history', async (req, res) => {
       success: false,
       message: 'Failed to fetch login history'
     });
+  }
+});
+
+// GET /api/admin/activity - the service timeline
+//
+// Every step of a visit, in the order it happened: a table being taken, the
+// order going in, staff picking it up, the kitchen finishing, and the food
+// reaching the table. Returns both the flat event feed and a per-order
+// summary with the gap between each handover, so the admin can see not just
+// what happened but how long each stage took.
+router.get('/activity', async (req, res) => {
+  try {
+    const hours = Math.min(Number(req.query.hours) || 24, 24 * 14);
+    const limit = Math.min(Number(req.query.limit) || 60, 300);
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+    const [orders, guests] = await Promise.all([
+      Order.find({ createdAt: { $gte: since } }).sort({ createdAt: -1 }).limit(limit),
+      // A guest session is the seating record for a table.
+      User.find({ role: 'guest', createdAt: { $gte: since } })
+        .select('name tableNumber createdAt')
+        .sort({ createdAt: -1 })
+        .limit(limit),
+    ]);
+
+    const events = [
+      ...guests.map(seatingEvent),
+      ...orders.flatMap(orderEvents),
+    ].sort((a, b) => new Date(b.at) - new Date(a.at));
+
+    const timeline = orders.map(orderTimeline);
+
+    // Averages are only meaningful for orders that finished, so the ones
+    // still in the kitchen are left out rather than counted as instant.
+    const served = timeline.filter((row) => row.totalMinutes !== null);
+    const average = (key) => {
+      const values = served.map((row) => row[key]).filter((value) => value !== null);
+      if (!values.length) return null;
+      return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+    };
+
+    res.json({
+      success: true,
+      hours,
+      events: events.slice(0, limit),
+      timeline,
+      tablesSeated: guests.length,
+      averages: {
+        waitToAccept: average('waitToAccept'),
+        timeInKitchen: average('timeInKitchen'),
+        waitToServe: average('waitToServe'),
+        totalMinutes: average('totalMinutes'),
+        servedOrders: served.length,
+      },
+    });
+  } catch (error) {
+    console.error('Get activity error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch the service timeline' });
   }
 });
 

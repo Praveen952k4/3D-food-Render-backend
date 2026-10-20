@@ -39,6 +39,14 @@ const foodItemSchema = new mongoose.Schema({
     required: true,
     default: 0,
   },
+  // How long the kitchen needs for this dish, in minutes. Shown to customers
+  // on the menu so they can see what they are waiting for before they order,
+  // and used to work out the estimate for a whole order.
+  prepTimeMinutes: {
+    type: Number,
+    default: 15,
+    min: 0,
+  },
   isVeg: {
     type: Boolean,
     default: true,

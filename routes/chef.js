@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
+const { orderEvents, emitActivity } = require('../utils/activity');
 const { authenticate, isKitchen } = require('../middleware/auth');
 
 // Get orders for chef - show all orders except cancelled/delivered
@@ -102,6 +103,9 @@ router.patch('/orders/:orderId/status', authenticate, isKitchen, async (req, res
         order: order,
         newStatus: status,
       });
+
+      // ... and add this stage to the admin's service timeline.
+      emitActivity(io, orderEvents(order).slice(-1)[0]);
     }
 
     res.json({ 
@@ -186,6 +190,9 @@ router.put('/orders/:id/deliver', authenticate, isKitchen, async (req, res) => {
         orderId: order._id,
         orderNumber: order.orderNumber,
       });
+
+      // ... and record the moment the food reached the customer.
+      emitActivity(io, orderEvents(order).slice(-1)[0]);
     }
 
     console.log(`✅ Order ${order.orderNumber} marked as delivered by chef`);

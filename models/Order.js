@@ -33,6 +33,9 @@ const orderSchema = new mongoose.Schema({
     price: Number,
     quantity: Number,
     subtotal: Number,
+    // Copied from the dish when the order is placed, so a later menu edit
+    // does not rewrite what this customer was promised.
+    prepTimeMinutes: Number,
     customizations: [{
       spiceLevel: {
         type: String,
@@ -70,6 +73,13 @@ const orderSchema = new mongoose.Schema({
   tableNumber: {
     type: String,
     default: '',
+  },
+  // The kitchen works on dishes side by side, so the estimate for the whole
+  // order is the longest dish on it, not the sum. Admin compares this against
+  // how long service actually took.
+  estimatedPrepMinutes: {
+    type: Number,
+    default: 0,
   },
   comment: {
     type: String,

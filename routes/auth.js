@@ -3,6 +3,7 @@ const router = express.Router();
 const User = require('../models/User');
 const Table = require('../models/Table');
 const { generateToken } = require('../middleware/auth');
+const { seatingEvent, emitActivity } = require('../utils/activity');
 
 // Generate OTP (using dummy OTP for development)
 const generateOTP = () => {
@@ -301,6 +302,10 @@ router.post('/guest/login', async (req, res) => {
     const token = generateToken(guest._id, guest.phone, guest.role);
 
     console.log(`🪑 Guest signed in at table ${tableNumber} (${guest.name})`);
+
+    // The admin's service timeline starts here: the table is taken, and every
+    // later stage of this visit is measured from this moment.
+    emitActivity(req.app.get('io'), seatingEvent(guest));
 
     res.json({
       success: true,

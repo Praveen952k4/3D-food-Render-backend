@@ -50,6 +50,13 @@ const tableSchema = new mongoose.Schema({
     enum: ['walk-in', 'booking', ''],
     default: '',
   },
+  // When this table's most recent order was served. A party is usually still
+  // eating for a while after that, so the table is let go once it has been
+  // quiet since — not the moment the plate lands.
+  lastServedAt: {
+    type: Date,
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -69,6 +76,7 @@ tableSchema.methods.hold = function (guest, via) {
   this.occupiedAt = new Date();
   this.occupantName = guest.name || '';
   this.heldVia = via;
+  this.lastServedAt = null;
 };
 
 /** Let the table go once the visit is over. Call save() afterwards. */
@@ -77,6 +85,7 @@ tableSchema.methods.release = function () {
   this.occupiedAt = null;
   this.occupantName = '';
   this.heldVia = '';
+  this.lastServedAt = null;
 };
 
 module.exports = mongoose.model('Table', tableSchema);

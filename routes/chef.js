@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 const Table = require('../models/Table');
-const { orderEvents, emitActivity, releaseTableForOrder } = require('../utils/activity');
+const { orderEvents, emitActivity, markOrderServed } = require('../utils/activity');
 const { authenticate, isKitchen } = require('../middleware/auth');
 
 // Get orders for chef - show all orders except cancelled/delivered
@@ -109,10 +109,10 @@ router.patch('/orders/:orderId/status', authenticate, isKitchen, async (req, res
       emitActivity(io, orderEvents(order).slice(-1)[0]);
     }
 
-    // The visit ends when the food reaches the table, so the table goes back
-    // on the list for the next guest.
+    // Serving does not end the visit — the party is usually still eating, and
+    // often orders again. It starts the clock housekeeping watches.
     if (status === 'delivered') {
-      await releaseTableForOrder(Table, order, req.app.get('io'));
+      await markOrderServed(Table, order, req.app.get('io'));
     }
 
     res.json({ 
@@ -202,7 +202,7 @@ router.put('/orders/:id/deliver', authenticate, isKitchen, async (req, res) => {
       emitActivity(io, orderEvents(order).slice(-1)[0]);
     }
 
-    await releaseTableForOrder(Table, order, req.app.get('io'));
+    await markOrderServed(Table, order, req.app.get('io'));
 
     console.log(`✅ Order ${order.orderNumber} marked as delivered by chef`);
     

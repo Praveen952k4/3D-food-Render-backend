@@ -12,6 +12,8 @@ dotenv.config();
 // Import routes
 const authRoutes = require('./routes/auth');
 const bookingRoutes = require('./routes/bookings');
+const tableRoutes = require('./routes/tables');
+const { runHousekeeping } = require('./utils/housekeeping');
 const orderRoutes = require('./routes/orders');
 const foodRoutes = require('./routes/food');
 const adminRoutes = require('./routes/admin');
@@ -140,6 +142,7 @@ mongoose.connect(process.env.MONGODB_URI)
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/tables', tableRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/food', foodRoutes);
 app.use('/api/admin', adminRoutes);
@@ -167,6 +170,12 @@ app.use((err, req, res, next) => {
     error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
+
+// Reservations nobody arrives for, and tables nobody is sitting at any more.
+// The requests that depend on this also run it themselves, because on a
+// serverless host this timer may never fire.
+const HOUSEKEEPING_EVERY_MS = 60 * 1000;
+setInterval(() => runHousekeeping(io), HOUSEKEEPING_EVERY_MS).unref?.();
 
 const PORT = process.env.PORT || 5000;
 

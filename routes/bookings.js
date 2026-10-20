@@ -6,6 +6,7 @@ const Order = require('../models/Order');
 const FoodItem = require('../models/FoodItem');
 const { authenticate, isAdmin } = require('../middleware/auth');
 const { emitActivity, emitTableChange, bookingEvent } = require('../utils/activity');
+const { housekeepingTick } = require('../utils/housekeeping');
 
 const DEFAULT_DURATION = Number(process.env.BOOKING_DURATION_MINUTES || 90);
 
@@ -63,6 +64,10 @@ const snapshotPreOrder = async (items) => {
 // show them greyed out rather than silently dropping them.
 router.get('/availability', async (req, res) => {
   try {
+    // A reservation past its grace period is not holding anything, and a table
+    // that has been quiet is free. Availability that is a sweep behind is
+    // worse than no sweep at all.
+    housekeepingTick(req);
     const { when, error } = parseSlot(req.query.scheduledFor);
     if (error) return res.status(400).json({ success: false, message: error });
 
@@ -180,6 +185,7 @@ router.post('/', authenticate, async (req, res) => {
 // GET /api/bookings/mine - the signed-in customer's own bookings
 router.get('/mine', authenticate, async (req, res) => {
   try {
+    housekeepingTick(req);
     const bookings = await Booking.find({ userId: req.user.id }).sort({ scheduledFor: -1 }).limit(50);
     res.json({ success: true, bookings });
   } catch (error) {
@@ -350,6 +356,7 @@ router.patch('/:id/cancel', authenticate, async (req, res) => {
 // GET /api/bookings - every booking, for the admin
 router.get('/', authenticate, isAdmin, async (req, res) => {
   try {
+    housekeepingTick(req);
     const days = Math.min(Number(req.query.days) || 7, 90);
     const from = new Date(Date.now() - 12 * 60 * 60 * 1000);
     const to = new Date(Date.now() + days * 24 * 60 * 60 * 1000);

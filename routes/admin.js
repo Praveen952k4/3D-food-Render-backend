@@ -5,7 +5,8 @@ const User = require('../models/User');
 const FoodItem = require('../models/FoodItem');
 const Table = require('../models/Table');
 const { authenticate, isAdmin } = require('../middleware/auth');
-const { seatingEvent, orderEvents, orderTimeline, releaseTableForOrder } = require('../utils/activity');
+const { seatingEvent, orderEvents, orderTimeline, markOrderServed } = require('../utils/activity');
+const { housekeepingTick } = require('../utils/housekeeping');
 
 // Apply authentication and admin check to all routes
 router.use(authenticate);
@@ -92,12 +93,18 @@ router.put('/orders/:id', async (req, res) => {
     
     console.log(`✅ Order ${order.orderNumber} updated successfully`);
 
-    // Serving the food ends the visit, so the table is let go here too — an
-    // admin can mark an order delivered without the kitchen touching it. A
-    // cancelled order ends the visit as well; holding that table would strand
-    // it until someone noticed.
-    if (statusChanged && ['delivered', 'cancelled'].includes(order.status)) {
-      await releaseTableForOrder(Table, order, req.app.get('io'));
+    // An admin can mark an order delivered without the kitchen touching it,
+    // so the idle clock starts here too. A cancelled order is different: there
+    // is no meal to linger over, so that table is let go at once.
+    if (statusChanged && order.status === 'delivered') {
+      await markOrderServed(Table, order, req.app.get('io'));
+    }
+    if (statusChanged && order.status === 'cancelled') {
+      const table = await Table.findOne({ number: order.tableNumber });
+      if (table && String(table.occupiedBy) === String(order.userId)) {
+        table.release();
+        await table.save();
+      }
     }
 
     // Emit socket event for real-time notification to customer (only for status changes)
@@ -215,6 +222,8 @@ router.get('/users/login-history', async (req, res) => {
 // what happened but how long each stage took.
 router.get('/activity', async (req, res) => {
   try {
+    // Anything housekeeping is about to free should not show as still held.
+    housekeepingTick(req);
     const hours = Math.min(Number(req.query.hours) || 24, 24 * 14);
     const limit = Math.min(Number(req.query.limit) || 60, 300);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);

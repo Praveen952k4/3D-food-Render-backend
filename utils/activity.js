@@ -148,28 +148,33 @@ const emitTableChange = (io, table) => {
   });
 };
 
-/**
- * Let go of the table a served order was sitting at. A visit ends when the
- * food reaches the customer, so that is where the hold ends too — no staff
- * action needed, and nothing to forget.
- */
-const releaseTableForOrder = async (Table, order, io) => {
-  if (!order || !order.tableNumber) return;
+/** Older orders stored the table as "Table 5", newer ones as "5". */
+const tableNumberOf = (order) => {
+  const raw = String(order?.tableNumber ?? '').trim();
+  if (!raw) return '';
+  return raw.toLowerCase().startsWith('table') ? raw.slice(5).trim() : raw;
+};
 
-  // Older orders stored the table as "Table 5", newer ones as "5".
-  const raw = String(order.tableNumber).trim();
-  const number = raw.toLowerCase().startsWith('table') ? raw.slice(5).trim() : raw;
+/**
+ * Note that a table's food has arrived. The hold is not ended here: a party
+ * is usually still eating, and often orders again. The table is let go when
+ * they say they are leaving, when staff clear it, or when housekeeping finds
+ * it quiet — serving the food only starts that clock.
+ */
+const markOrderServed = async (Table, order, io) => {
+  const number = tableNumberOf(order);
+  if (!number) return;
 
   const table = await Table.findOne({ number });
   if (!table || !table.occupiedBy) return;
 
-  // Only the guest who holds it can end the hold, so serving one order does
-  // not clear a table that has already turned over to somebody else.
+  // Only the party who holds it, so serving one order cannot start the clock
+  // on a table that has already turned over to somebody else.
   if (String(table.occupiedBy) !== String(order.userId)) return;
 
-  table.release();
+  table.lastServedAt = new Date();
   await table.save();
-  console.log(`🪑 Table ${number} released after ${order.orderNumber} was served`);
+  console.log(`🍽️  Table ${number} served (${order.orderNumber}) — idle clock started`);
   emitTableChange(io, table);
 };
 
@@ -183,5 +188,6 @@ module.exports = {
   minutesBetween,
   emitActivity,
   emitTableChange,
-  releaseTableForOrder,
+  markOrderServed,
+  tableNumberOf,
 };

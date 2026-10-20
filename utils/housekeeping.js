@@ -1,7 +1,8 @@
 const Booking = require('../models/Booking');
 const Table = require('../models/Table');
 const Order = require('../models/Order');
-const { emitActivity, emitTableChange, bookingEvent } = require('./activity');
+const TableSession = require('../models/TableSession');
+const { emitActivity, emitTableChange, bookingEvent, tableLeftEvent } = require('./activity');
 
 /**
  * The two things nobody is around to do.
@@ -42,6 +43,7 @@ const sweepNoShows = async (io) => {
     if (table && String(table.occupiedBy) === String(booking.userId)) {
       table.release();
       await table.save();
+      await TableSession.close({ tableNumber: table.number, endedBy: 'no-show' });
       emitTableChange(io, table);
     }
 
@@ -73,9 +75,12 @@ const sweepIdleTables = async (io) => {
     });
     if (stillWorking) continue;
 
+    const leftBy = table.toObject();
     table.release();
     await table.save();
+    await TableSession.close({ tableNumber: table.number, endedBy: 'system' });
     emitTableChange(io, table);
+    emitActivity(io, tableLeftEvent(leftBy, 'system'));
     freed += 1;
     console.log(`🧹 Table ${table.number} freed — quiet for ${IDLE_MINUTES} min since the last course`);
   }

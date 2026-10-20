@@ -4,6 +4,7 @@ const Order = require('../models/Order');
 const Coupon = require('../models/Coupon');
 const FoodItem = require('../models/FoodItem');
 const Table = require('../models/Table');
+const TableSession = require('../models/TableSession');
 const User = require('../models/User');
 const { authenticate } = require('../middleware/auth');
 const { orderEvents, emitActivity, emitTableChange } = require('../utils/activity');
@@ -129,6 +130,12 @@ router.post('/', authenticate, async (req, res) => {
         const diner = await User.findById(req.user.id).select('name');
         table.hold({ _id: req.user.id, name: diner?.name || customerName }, 'walk-in');
         await table.save();
+        await TableSession.open({
+          tableNumber: table.number,
+          userId: req.user.id,
+          name: diner?.name || customerName,
+          via: 'walk-in',
+        });
         console.log(`🪑 Table ${table.number} taken by the order from ${customerName}`);
         emitTableChange(req.app.get('io'), table);
       }

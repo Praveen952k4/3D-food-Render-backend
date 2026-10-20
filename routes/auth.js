@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const Table = require('../models/Table');
+const TableSession = require('../models/TableSession');
 const { generateToken } = require('../middleware/auth');
 const { seatingEvent, emitActivity, emitTableChange } = require('../utils/activity');
 
@@ -329,6 +330,7 @@ const startGuestSession = async (req, { tableNumber, name, via }) => {
   // table reserved for a guest who was never signed in.
   table.hold(guest, via);
   await table.save();
+  await TableSession.open({ tableNumber: table.number, userId: guest._id, name: guest.name, via });
 
   const token = generateToken(guest._id, guest.phone, guest.role);
 

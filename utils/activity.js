@@ -31,6 +31,48 @@ const seatingEvent = (guest) => ({
   by: 'customer',
 });
 
+/**
+ * The two ends of a stay, from its own record — so these survive the party
+ * leaving and the page being reloaded, for account holders as well as guests.
+ */
+const sessionEvents = (session) => {
+  const events = [{
+    id: `sit-${session._id}`,
+    key: 'table-booked',
+    label: 'Table taken',
+    at: session.seatedAt,
+    tableNumber: session.tableNumber,
+    customerName: session.name || 'Guest',
+    orderNumber: '',
+    orderId: null,
+    by: 'customer',
+    via: session.via,
+  }];
+
+  if (session.leftAt) {
+    events.push({
+      id: `left-${session._id}`,
+      key: 'table-left',
+      label:
+        session.endedBy === 'guest'
+          ? 'Guest left the table'
+          : session.endedBy === 'system'
+          ? 'Table freed automatically'
+          : `Table cleared (${session.endedBy || 'staff'})`,
+      at: session.leftAt,
+      tableNumber: session.tableNumber,
+      customerName: session.name || 'Guest',
+      orderNumber: '',
+      orderId: null,
+      by: session.endedBy === 'guest' ? 'customer' : 'staff',
+      // How long they were there, which is the one duration no order can show.
+      stayMinutes: Math.round((new Date(session.leftAt) - new Date(session.seatedAt)) / 60000),
+    });
+  }
+
+  return events;
+};
+
 /** Every stage an order has been through, oldest first. */
 const orderEvents = (order) =>
   (order.statusHistory || [])
@@ -88,10 +130,19 @@ const orderTimeline = (order) => {
     cookingAt,
     readyAt,
     servedAt,
+    receiptSentAt: order.receiptSentAt || null,
     waitToAccept: minutesBetween(placedAt, acceptedAt || cookingAt),
     timeInKitchen: minutesBetween(cookingAt || acceptedAt, readyAt),
     waitToServe: minutesBetween(readyAt, servedAt),
     totalMinutes: minutesBetween(placedAt, servedAt),
+    // How long after the food landed the paperwork followed. A receipt dated
+    // before the food was marked served says the stages were recorded out of
+    // order, not that the paperwork travelled back in time, so it is left out
+    // rather than averaged as a negative.
+    servedToReceipt: (() => {
+      const gap = minutesBetween(servedAt, order.receiptSentAt);
+      return gap === null || gap < 0 ? null : gap;
+    })(),
   };
 };
 
@@ -119,6 +170,34 @@ const bookingEvent = (booking, stage) => ({
   partySize: booking.partySize,
   estimatedPrepMinutes: booking.estimatedPrepMinutes || 0,
   itemCount: (booking.preOrderItems || []).reduce((sum, item) => sum + (item.quantity || 0), 0),
+});
+
+/** The receipt leaving for the customer: the last timed step of a visit. */
+const receiptEvent = (order) => ({
+  id: `receipt-${order._id}`,
+  key: 'receipt-sent',
+  label: 'Receipt sent to customer',
+  at: order.receiptSentAt || new Date(),
+  tableNumber: order.tableNumber || '',
+  customerName: order.customerName || '',
+  orderNumber: order.orderNumber,
+  orderId: order._id,
+  by: 'staff',
+  grandTotal: order.grandTotal,
+});
+
+/** The table going back on the floor, and who let it go. */
+const tableLeftEvent = (table, by) => ({
+  id: `left-${table._id}-${Date.now()}`,
+  key: 'table-left',
+  label:
+    by === 'guest' ? 'Guest left the table' : by === 'system' ? 'Table freed automatically' : 'Table cleared by staff',
+  at: new Date(),
+  tableNumber: table.number || '',
+  customerName: table.occupantName || '',
+  orderNumber: '',
+  orderId: null,
+  by: by === 'guest' ? 'customer' : 'staff',
 });
 
 /**
@@ -182,7 +261,10 @@ module.exports = {
   STAGE,
   BOOKING_STAGE,
   bookingEvent,
+  receiptEvent,
+  tableLeftEvent,
   seatingEvent,
+  sessionEvents,
   orderEvents,
   orderTimeline,
   minutesBetween,

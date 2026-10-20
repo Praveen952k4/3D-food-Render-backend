@@ -4,8 +4,9 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const FoodItem = require('../models/FoodItem');
 const Table = require('../models/Table');
+const TableSession = require('../models/TableSession');
 const { authenticate, isAdmin } = require('../middleware/auth');
-const { seatingEvent, orderEvents, orderTimeline, markOrderServed } = require('../utils/activity');
+const { sessionEvents, orderEvents, orderTimeline, markOrderServed, receiptEvent, emitActivity } = require('../utils/activity');
 const { housekeepingTick } = require('../utils/housekeeping');
 
 // Apply authentication and admin check to all routes
@@ -104,6 +105,7 @@ router.put('/orders/:id', async (req, res) => {
       if (table && String(table.occupiedBy) === String(order.userId)) {
         table.release();
         await table.save();
+        await TableSession.close({ tableNumber: table.number, endedBy: 'cancelled' });
       }
     }
 
@@ -228,18 +230,20 @@ router.get('/activity', async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 60, 300);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-    const [orders, guests] = await Promise.all([
+    const [orders, stays] = await Promise.all([
       Order.find({ createdAt: { $gte: since } }).sort({ createdAt: -1 }).limit(limit),
-      // A guest session is the seating record for a table.
-      User.find({ role: 'guest', createdAt: { $gte: since } })
-        .select('name tableNumber createdAt')
-        .sort({ createdAt: -1 })
+      // Every stay that started in the window, or is still going on.
+      TableSession.find({ $or: [{ seatedAt: { $gte: since } }, { leftAt: null }] })
+        .sort({ seatedAt: -1 })
         .limit(limit),
     ]);
 
     const events = [
-      ...guests.map(seatingEvent),
+      ...stays.flatMap(sessionEvents),
       ...orders.flatMap(orderEvents),
+      // The paperwork is part of the visit, so a receipt that has gone out
+      // sits on the timeline with everything else.
+      ...orders.filter((order) => order.receiptSentAt).map(receiptEvent),
     ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
     const timeline = orders.map(orderTimeline);
@@ -258,12 +262,13 @@ router.get('/activity', async (req, res) => {
       hours,
       events: events.slice(0, limit),
       timeline,
-      tablesSeated: guests.length,
+      tablesSeated: stays.length,
       averages: {
         waitToAccept: average('waitToAccept'),
         timeInKitchen: average('timeInKitchen'),
         waitToServe: average('waitToServe'),
         totalMinutes: average('totalMinutes'),
+        servedToReceipt: average('servedToReceipt'),
         servedOrders: served.length,
       },
     });
@@ -487,6 +492,10 @@ router.put('/orders/:id/send-receipt', async (req, res) => {
           ? `Your e-receipt for ${order.orderNumber} is ready`
           : `The e-receipt for ${order.orderNumber} was withdrawn`,
       });
+
+      // ... and onto the admin's timeline, so the visit is timed right
+      // through to the paperwork.
+      if (order.receiptSent) emitActivity(io, receiptEvent(order));
     }
 
     res.json({

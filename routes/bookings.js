@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Booking = require('../models/Booking');
 const Table = require('../models/Table');
+const TableSession = require('../models/TableSession');
 const Order = require('../models/Order');
 const FoodItem = require('../models/FoodItem');
 const { authenticate, isAdmin } = require('../middleware/auth');
@@ -263,6 +264,12 @@ router.post('/:id/check-in', authenticate, async (req, res) => {
     const guest = { _id: booking.userId, name: booking.customerName };
     table.hold(guest, 'booking');
     await table.save();
+    await TableSession.open({
+      tableNumber: table.number,
+      userId: booking.userId,
+      name: booking.customerName,
+      via: 'booking',
+    });
 
     let order = null;
     if (booking.preOrderItems.length > 0) {
@@ -342,6 +349,7 @@ router.patch('/:id/cancel', authenticate, async (req, res) => {
       if (table && String(table.occupiedBy) === String(booking.userId)) {
         table.release();
         await table.save();
+        await TableSession.close({ tableNumber: table.number, endedBy: 'cancelled' });
         emitTableChange(req.app.get('io'), table);
       }
     }
@@ -399,6 +407,7 @@ router.patch('/:id/status', authenticate, isAdmin, async (req, res) => {
     if (table && String(table.occupiedBy) === String(booking.userId)) {
       table.release();
       await table.save();
+      await TableSession.close({ tableNumber: table.number, endedBy: status });
       emitTableChange(req.app.get('io'), table);
     }
 

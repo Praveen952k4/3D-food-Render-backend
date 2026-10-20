@@ -128,14 +128,13 @@ router.post('/verify-otp', async (req, res) => {
       });
     }
 
-    // This is the customer door. Admins share it, because they sign in with a
-    // phone number too; kitchen staff and guests have their own.
-    if (!['customer', 'admin'].includes(user.role)) {
+    // Customers, admins and kitchen staff all sign in with a phone number and
+    // the dummy OTP. Only guests are turned away: their stored "phone" is a
+    // generated session id, not a number anyone can type in.
+    if (user.role === 'guest') {
       return res.status(403).json({
         success: false,
-        message: user.role === 'chef'
-          ? 'Kitchen staff sign in with a staff ID and password.'
-          : 'Guests sign in with their table number.',
+        message: 'Guests sign in with their table number.',
       });
     }
 

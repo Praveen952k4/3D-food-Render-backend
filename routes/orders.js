@@ -3,8 +3,10 @@ const router = express.Router();
 const Order = require('../models/Order');
 const Coupon = require('../models/Coupon');
 const FoodItem = require('../models/FoodItem');
+const Table = require('../models/Table');
+const User = require('../models/User');
 const { authenticate } = require('../middleware/auth');
-const { orderEvents, emitActivity } = require('../utils/activity');
+const { orderEvents, emitActivity, emitTableChange } = require('../utils/activity');
 
 // GET /api/orders - Get user orders
 router.get('/', authenticate, async (req, res) => {
@@ -82,6 +84,58 @@ router.post('/', authenticate, async (req, res) => {
       });
     }
 
+    // The table number used to be whatever the customer typed, so two parties
+    // could order against one table — their courses mixed together in the
+    // kitchen and on the bill — and neither was ever told. It is now checked
+    // against who is actually sitting where.
+    let orderTable = '';
+    if (orderType === 'dine-in') {
+      const wanted = String(tableNumber).trim().replace(/^table\s*/i, '');
+      const table = await Table.findOne({ number: wanted });
+
+      if (!table || !table.isActive) {
+        return res.status(404).json({
+          success: false,
+          message: `Table ${wanted} is not one of ours. Check the number on your table card.`,
+        });
+      }
+
+      const held = await Table.findOne({ occupiedBy: req.user.id });
+
+      if (held && held.number !== table.number) {
+        // They are sitting at one table and ordering for another. Almost
+        // always a typo, and sending the food to the wrong table is worse
+        // than asking.
+        return res.status(409).json({
+          success: false,
+          message: `You are signed in at table ${held.number}, so this order cannot go to table ${wanted}. Change it to ${held.number}, or ask a member of staff to move you.`,
+          yourTable: held.number,
+        });
+      }
+
+      if (!held && table.occupiedBy) {
+        // Somebody else's table. This is the case that used to go through
+        // silently and put two parties on one ticket.
+        return res.status(409).json({
+          success: false,
+          message: `Table ${wanted} is being used by another party. Please order for your own table, or ask a member of staff.`,
+        });
+      }
+
+      if (!held) {
+        // Nobody is at it and nobody is at any other table either: a diner who
+        // walked in and ordered straight from the menu. Take the table for
+        // them, so the next person cannot order against it too.
+        const diner = await User.findById(req.user.id).select('name');
+        table.hold({ _id: req.user.id, name: diner?.name || customerName }, 'walk-in');
+        await table.save();
+        console.log(`🪑 Table ${table.number} taken by the order from ${customerName}`);
+        emitTableChange(req.app.get('io'), table);
+      }
+
+      orderTable = table.number;
+    }
+
     // Validate and increment coupon usage if provided
     if (couponCode && couponCode.trim() !== '') {
       console.log('🎟️ Validating coupon:', couponCode);
@@ -149,7 +203,7 @@ router.post('/', authenticate, async (req, res) => {
       couponCode: couponCode || '',
       couponDiscount: couponDiscount || 0,
       grandTotal,
-      tableNumber: orderType === 'dine-in' ? tableNumber : '',
+      tableNumber: orderTable,
       comment,
       paymentMethod: paymentMethod || 'cash',
       status: 'pending',

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const FoodItem = require('../models/FoodItem');
+const Order = require('../models/Order');
 const { authenticate } = require('../middleware/auth');
 
 // GET /api/food - Get all food items
@@ -35,6 +36,54 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/food/:id - Get single food item
+/**
+ * How long this dish has actually taken, measured from the orders it was on:
+ * the gap between the kitchen starting and the dish being ready.
+ *
+ * This is not the number the admin types in. That one is an estimate used to
+ * quote a wait before anything is cooked; this is what the kitchen really
+ * did, so it cannot be edited — it is only ever observed.
+ */
+const measuredPrepTime = async (foodId) => {
+  const orders = await Order.find({
+    'items.foodId': foodId,
+    status: { $in: ['ready', 'delivered'] },
+  })
+    .select('statusHistory')
+    .sort({ createdAt: -1 })
+    .limit(100);
+
+  const durations = [];
+  for (const order of orders) {
+    const at = (status) => {
+      const entry = (order.statusHistory || []).find((e) => e.status === status);
+      return entry ? new Date(entry.timestamp) : null;
+    };
+    // Cooking starts at 'preparing'; an order a chef pushed straight to
+    // 'ready' is measured from when staff took it instead.
+    const started = at('preparing') || at('confirmed');
+    const ready = at('ready');
+    if (!started || !ready) continue;
+
+    const minutes = (ready - started) / 60000;
+    // A negative gap means the stages were recorded out of order, and a day
+    // means somebody left a ticket open overnight. Neither says anything
+    // about the dish.
+    if (minutes < 0 || minutes > 240) continue;
+    durations.push(minutes);
+  }
+
+  if (durations.length === 0) return { averageMinutes: null, sampleSize: 0 };
+
+  const total = durations.reduce((sum, value) => sum + value, 0);
+  return {
+    averageMinutes: Math.round((total / durations.length) * 10) / 10,
+    sampleSize: durations.length,
+    fastestMinutes: Math.round(Math.min(...durations)),
+    slowestMinutes: Math.round(Math.max(...durations)),
+  };
+};
+
 router.get('/:id', async (req, res) => {
   try {
     const foodItem = await FoodItem.findById(req.params.id);
@@ -46,9 +95,14 @@ router.get('/:id', async (req, res) => {
       });
     }
 
+    const actualPrepTime = await measuredPrepTime(foodItem._id);
+
     res.json({ 
       success: true, 
-      foodItem 
+      foodItem,
+      // Observed, never set: what the kitchen actually took, alongside the
+      // estimate on the dish itself.
+      actualPrepTime,
     });
   } catch (error) {
     console.error('Get food item error:', error);

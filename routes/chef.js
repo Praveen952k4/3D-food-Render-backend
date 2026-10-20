@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
-const { orderEvents, emitActivity } = require('../utils/activity');
+const Table = require('../models/Table');
+const { orderEvents, emitActivity, releaseTableForOrder } = require('../utils/activity');
 const { authenticate, isKitchen } = require('../middleware/auth');
 
 // Get orders for chef - show all orders except cancelled/delivered
@@ -108,6 +109,12 @@ router.patch('/orders/:orderId/status', authenticate, isKitchen, async (req, res
       emitActivity(io, orderEvents(order).slice(-1)[0]);
     }
 
+    // The visit ends when the food reaches the table, so the table goes back
+    // on the list for the next guest.
+    if (status === 'delivered') {
+      await releaseTableForOrder(Table, order, req.app.get('io'));
+    }
+
     res.json({ 
       success: true, 
       message: `Order status updated to ${status}`,
@@ -194,6 +201,8 @@ router.put('/orders/:id/deliver', authenticate, isKitchen, async (req, res) => {
       // ... and record the moment the food reached the customer.
       emitActivity(io, orderEvents(order).slice(-1)[0]);
     }
+
+    await releaseTableForOrder(Table, order, req.app.get('io'));
 
     console.log(`✅ Order ${order.orderNumber} marked as delivered by chef`);
     

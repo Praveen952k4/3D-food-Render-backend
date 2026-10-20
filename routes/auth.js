@@ -3,7 +3,7 @@ const router = express.Router();
 const User = require('../models/User');
 const Table = require('../models/Table');
 const { generateToken } = require('../middleware/auth');
-const { seatingEvent, emitActivity } = require('../utils/activity');
+const { seatingEvent, emitActivity, emitTableChange } = require('../utils/activity');
 
 // Generate OTP (using dummy OTP for development)
 const generateOTP = () => {
@@ -256,67 +256,146 @@ const publicUser = (user) => ({
   tableNumber: user.tableNumber,
 });
 
-// POST /api/auth/guest/login - sign in by table number, no account needed
-router.post('/guest/login', async (req, res) => {
-  try {
-    const tableNumber = String(req.body.tableNumber ?? '').trim();
-    const name = String(req.body.name ?? '').trim();
+// --- the two guest doors ---------------------------------------------------
+//
+// Both end in the same place — a guest session tied to one table — but they
+// are reached differently. A walk-in is already sitting down and types the
+// number on their table card; a booking picks a free table from the list
+// before arriving. Either way the table is held for the length of the visit,
+// so it stops being offered to anyone else.
 
-    if (!tableNumber) {
-      return res.status(400).json({ success: false, message: 'Please enter your table number.' });
-    }
+/**
+ * Check the table, hold it, and open a guest session on it.
+ * Returns either { error: {status, message} } or { payload } to send back.
+ */
+const startGuestSession = async (req, { tableNumber, name, via }) => {
+  if (!tableNumber) {
+    return { error: { status: 400, message: 'Please choose your table.' } };
+  }
 
-    // The table is validated against the tables collection, so a guess at a
-    // number that does not exist is refused.
-    const table = await Table.findOne({ number: tableNumber });
+  // The table is validated against the tables collection, so a guess at a
+  // number that does not exist is refused.
+  const table = await Table.findOne({ number: tableNumber });
 
-    if (!table) {
-      return res.status(404).json({
-        success: false,
+  if (!table) {
+    return {
+      error: {
+        status: 404,
         message: `Table ${tableNumber} is not one of ours. Check the number on the table card.`,
-      });
-    }
+      },
+    };
+  }
 
-    if (!table.isActive) {
-      return res.status(403).json({
-        success: false,
+  if (!table.isActive) {
+    return {
+      error: {
+        status: 403,
         message: `Table ${tableNumber} is not in service right now. Please ask a member of staff.`,
-      });
-    }
+      },
+    };
+  }
 
-    // One record per guest session, keyed by a generated id in the phone
-    // field so everything downstream that looks a customer up by phone keeps
-    // working. It is never a real phone number.
-    const sessionId = `GUEST-T${tableNumber}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  // Someone already holds it. Said plainly, because the person reading this
+  // is standing in the restaurant and needs to know to ask a member of staff
+  // rather than to try again.
+  if (table.occupiedBy) {
+    return {
+      error: {
+        status: 409,
+        message:
+          via === 'booking'
+            ? `Table ${tableNumber} has just been taken. Please pick another one.`
+            : `Table ${tableNumber} is already in use by another guest. Please ask a member of staff.`,
+      },
+    };
+  }
 
-    const guest = new User({
-      phone: sessionId,
-      name: name || `Table ${tableNumber} guest`,
-      role: 'guest',
-      tableNumber,
-      isVerified: true,
-    });
-    recordLogin(guest, req);
-    await guest.save();
+  // One record per guest session, keyed by a generated id in the phone
+  // field so everything downstream that looks a customer up by phone keeps
+  // working. It is never a real phone number.
+  const sessionId = `GUEST-T${tableNumber}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
-    const token = generateToken(guest._id, guest.phone, guest.role);
+  const guest = new User({
+    phone: sessionId,
+    name: name || `Table ${tableNumber} guest`,
+    role: 'guest',
+    tableNumber,
+    isVerified: true,
+  });
+  recordLogin(guest, req);
+  await guest.save();
 
-    console.log(`🪑 Guest signed in at table ${tableNumber} (${guest.name})`);
+  // Held only once the session exists, so a failure above never leaves a
+  // table reserved for a guest who was never signed in.
+  table.hold(guest, via);
+  await table.save();
 
-    // The admin's service timeline starts here: the table is taken, and every
-    // later stage of this visit is measured from this moment.
-    emitActivity(req.app.get('io'), seatingEvent(guest));
+  const token = generateToken(guest._id, guest.phone, guest.role);
 
-    res.json({
+  console.log(`🪑 Guest ${via} at table ${tableNumber} (${guest.name})`);
+
+  // The admin's service timeline starts here: the table is taken, and every
+  // later stage of this visit is measured from this moment.
+  emitActivity(req.app.get('io'), seatingEvent(guest));
+
+  // Every other guest door is watching for this, so a table that has just
+  // gone grey or come free updates without a reload.
+  emitTableChange(req.app.get('io'), table);
+
+  return {
+    payload: {
       success: true,
       message: `Welcome to table ${tableNumber}`,
       token,
       user: publicUser(guest),
       table: { number: table.number, label: table.label, seats: table.seats },
+    },
+  };
+};
+
+// POST /api/auth/guest/login - already seated: sign in by table number
+router.post('/guest/login', async (req, res) => {
+  try {
+    const result = await startGuestSession(req, {
+      tableNumber: String(req.body.tableNumber ?? '').trim(),
+      name: String(req.body.name ?? '').trim(),
+      via: 'walk-in',
     });
+
+    if (result.error) {
+      return res.status(result.error.status).json({ success: false, message: result.error.message });
+    }
+    res.json(result.payload);
   } catch (error) {
     console.error('Guest login error:', error);
     res.status(500).json({ success: false, message: 'Could not start your guest session.' });
+  }
+});
+
+// POST /api/auth/guest/book - reserve one of the free tables and sit down at it
+router.post('/guest/book', async (req, res) => {
+  try {
+    const name = String(req.body.name ?? '').trim();
+
+    // A booking is held in someone's name, so unlike a walk-in the name is
+    // not optional — staff need to know whose table it is.
+    if (!name) {
+      return res.status(400).json({ success: false, message: 'Please give the name to hold the table under.' });
+    }
+
+    const result = await startGuestSession(req, {
+      tableNumber: String(req.body.tableNumber ?? '').trim(),
+      name,
+      via: 'booking',
+    });
+
+    if (result.error) {
+      return res.status(result.error.status).json({ success: false, message: result.error.message });
+    }
+    res.json({ ...result.payload, message: `Table ${req.body.tableNumber} is held for ${name}` });
+  } catch (error) {
+    console.error('Table booking error:', error);
+    res.status(500).json({ success: false, message: 'Could not book that table.' });
   }
 });
 
@@ -365,11 +444,27 @@ router.post('/staff/login', async (req, res) => {
   }
 });
 
-// GET /api/auth/tables - the table numbers a guest can choose from
+// GET /api/auth/tables - the tables a guest can choose from, and which of
+// them are free. A held table is still listed so the door can show it as
+// taken rather than silently hiding it, which only looks like a bug to
+// someone standing at that table.
 router.get('/tables', async (req, res) => {
   try {
-    const tables = await Table.find({ isActive: true }).sort({ number: 1 }).select('number label seats');
-    res.json({ success: true, tables });
+    const tables = await Table.find({ isActive: true })
+      .sort({ number: 1 })
+      .select('number label seats occupiedBy occupiedAt heldVia');
+
+    res.json({
+      success: true,
+      tables: tables.map((table) => ({
+        number: table.number,
+        label: table.label,
+        seats: table.seats,
+        isOccupied: Boolean(table.occupiedBy),
+        occupiedAt: table.occupiedAt,
+        heldVia: table.heldVia,
+      })),
+    });
   } catch (error) {
     console.error('Get tables error:', error);
     res.status(500).json({ success: false, message: 'Could not load the table list.' });

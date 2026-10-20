@@ -3,8 +3,9 @@ const router = express.Router();
 const Order = require('../models/Order');
 const User = require('../models/User');
 const FoodItem = require('../models/FoodItem');
+const Table = require('../models/Table');
 const { authenticate, isAdmin } = require('../middleware/auth');
-const { seatingEvent, orderEvents, orderTimeline } = require('../utils/activity');
+const { seatingEvent, orderEvents, orderTimeline, releaseTableForOrder } = require('../utils/activity');
 
 // Apply authentication and admin check to all routes
 router.use(authenticate);
@@ -90,6 +91,14 @@ router.put('/orders/:id', async (req, res) => {
     await order.save();
     
     console.log(`✅ Order ${order.orderNumber} updated successfully`);
+
+    // Serving the food ends the visit, so the table is let go here too — an
+    // admin can mark an order delivered without the kitchen touching it. A
+    // cancelled order ends the visit as well; holding that table would strand
+    // it until someone noticed.
+    if (statusChanged && ['delivered', 'cancelled'].includes(order.status)) {
+      await releaseTableForOrder(Table, order, req.app.get('io'));
+    }
 
     // Emit socket event for real-time notification to customer (only for status changes)
     const io = req.app.get('io');

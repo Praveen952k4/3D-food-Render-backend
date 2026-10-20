@@ -104,4 +104,56 @@ const emitActivity = (io, event) => {
   io.emit('activity', event);
 };
 
-module.exports = { STAGE, seatingEvent, orderEvents, orderTimeline, minutesBetween, emitActivity };
+/**
+ * Tell every open sign-in page that a table has been taken or let go, so the
+ * list of free tables stays honest while someone is looking at it. Two people
+ * picking the same table seconds apart is the case this exists for: the
+ * second one sees it go grey, and the server still refuses it either way.
+ */
+const emitTableChange = (io, table) => {
+  if (!io || !table) return;
+  io.emit('tableChange', {
+    number: table.number,
+    label: table.label,
+    seats: table.seats,
+    isOccupied: Boolean(table.occupiedBy),
+    occupiedAt: table.occupiedAt,
+    heldVia: table.heldVia,
+  });
+};
+
+/**
+ * Let go of the table a served order was sitting at. A visit ends when the
+ * food reaches the customer, so that is where the hold ends too — no staff
+ * action needed, and nothing to forget.
+ */
+const releaseTableForOrder = async (Table, order, io) => {
+  if (!order || !order.tableNumber) return;
+
+  // Older orders stored the table as "Table 5", newer ones as "5".
+  const raw = String(order.tableNumber).trim();
+  const number = raw.toLowerCase().startsWith('table') ? raw.slice(5).trim() : raw;
+
+  const table = await Table.findOne({ number });
+  if (!table || !table.occupiedBy) return;
+
+  // Only the guest who holds it can end the hold, so serving one order does
+  // not clear a table that has already turned over to somebody else.
+  if (String(table.occupiedBy) !== String(order.userId)) return;
+
+  table.release();
+  await table.save();
+  console.log(`🪑 Table ${number} released after ${order.orderNumber} was served`);
+  emitTableChange(io, table);
+};
+
+module.exports = {
+  STAGE,
+  seatingEvent,
+  orderEvents,
+  orderTimeline,
+  minutesBetween,
+  emitActivity,
+  emitTableChange,
+  releaseTableForOrder,
+};

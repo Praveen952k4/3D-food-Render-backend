@@ -8,7 +8,7 @@
     "dev": "nodemon server.js",
     "seed": "node seed.js",
     "check-db": "node check-db.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node tests/gst.test.js && node tests/enquiry.test.js"
   },
   "keywords": [
     "restaurant",

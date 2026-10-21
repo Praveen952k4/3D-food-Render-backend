@@ -22,6 +22,8 @@ const analyticsRoutes = require('./routes/analytics');
 const couponRoutes = require('./routes/coupons');
 const feedbackRoutes = require('./routes/feedback');
 const itemFeedbackRoutes = require('./routes/itemFeedback');
+const gstRoutes = require('./routes/gst');
+const enquiryRoutes = require('./routes/enquiries');
 
 const app = express();
 const server = http.createServer(app);
@@ -151,6 +153,8 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/item-feedback', itemFeedbackRoutes);
+app.use('/api/gst', gstRoutes);
+app.use('/api/enquiries', enquiryRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

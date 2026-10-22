@@ -138,7 +138,11 @@ mongoose.connect(process.env.MONGODB_URI)
   console.error('  2. Connection string is correct in .env');
   console.error('  3. Database name is valid');
   console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  process.exit(1);
+  // Deliberately not exiting. On a serverless host, killing the process over
+  // a connection that may well succeed on the next attempt takes the whole
+  // API down — every route, health check included — and it stays down. The
+  // requests that need the database fail on their own and say so; mongoose
+  // reconnects underneath.
 });
 
 // Routes
@@ -183,17 +187,26 @@ setInterval(() => runHousekeeping(io), HOUSEKEEPING_EVERY_MS).unref?.();
 
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🚀 AR Food Backend Server Started!');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🌐 Server URL: http://localhost:' + PORT);
-  console.log('📡 API Base: http://localhost:' + PORT + '/api');
-  console.log('🔌 Socket.IO: http://localhost:' + PORT);
-  console.log('❤️  Health Check: http://localhost:' + PORT + '/api/health');
-  console.log('📱 Admin Phone: ' + process.env.ADMIN_PHONES);
-  console.log('🔧 Environment: ' + (process.env.NODE_ENV || 'development'));
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('✨ Server is ready to accept requests!');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-});
+// A serverless host loads this file for its export and hands each request to
+// it; nothing is listening on a port there, so a server that only listens has
+// no handler to invoke and every request fails before it reaches a route.
+// Run directly — `node server.js`, nodemon, a container — and it listens as
+// it always did.
+if (require.main !== module) {
+  module.exports = app;
+} else {
+  server.listen(PORT, () => {
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('🚀 AR Food Backend Server Started!');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('🌐 Server URL: http://localhost:' + PORT);
+    console.log('📡 API Base: http://localhost:' + PORT + '/api');
+    console.log('🔌 Socket.IO: http://localhost:' + PORT);
+    console.log('❤️  Health Check: http://localhost:' + PORT + '/api/health');
+    console.log('📱 Admin Phone: ' + process.env.ADMIN_PHONES);
+    console.log('🔧 Environment: ' + (process.env.NODE_ENV || 'development'));
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('✨ Server is ready to accept requests!');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  });
+}

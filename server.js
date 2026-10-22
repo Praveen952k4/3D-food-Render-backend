@@ -109,6 +109,14 @@ app.use((req, res, next) => {
   next();
 });
 
+// The last thing to go wrong talking to the database. Now that a failed
+// connection no longer takes the process down, this is what tells you why
+// the routes are failing — the health check reports it.
+let lastDbError = null;
+mongoose.connection.on('error', (err) => {
+  lastDbError = err;
+});
+
 // Database connection
 mongoose.connect(process.env.MONGODB_URI)
 .then(async () => {
@@ -138,6 +146,7 @@ mongoose.connect(process.env.MONGODB_URI)
   console.error('  2. Connection string is correct in .env');
   console.error('  3. Database name is valid');
   console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  lastDbError = err;
   // Deliberately not exiting. On a serverless host, killing the process over
   // a connection that may well succeed on the next attempt takes the whole
   // API down — every route, health check included — and it stays down. The
@@ -161,11 +170,28 @@ app.use('/api/gst', gstRoutes);
 app.use('/api/enquiries', enquiryRoutes);
 
 // Health check
+//
+// It answers whether the database is actually reachable, not only whether
+// this process is up. The two are different things now that a database it
+// cannot reach no longer kills the process — and when every route is failing
+// and the logs are on someone else's machine, this is the difference between
+// guessing and knowing. No connection string or credential is reported: the
+// host it reached, and what it said, are enough to tell a blocked network
+// from a refused password.
+const DB_STATE = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  const { readyState, host, name } = mongoose.connection;
+  res.json({
+    status: 'OK',
     message: 'AR Food Backend is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    database: {
+      state: DB_STATE[readyState] || 'unknown',
+      host: host || null,
+      name: name || null,
+      lastError: lastDbError ? lastDbError.message : null,
+    },
   });
 });
 

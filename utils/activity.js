@@ -191,13 +191,19 @@ const tableLeftEvent = (table, by) => ({
   id: `left-${table._id}-${Date.now()}`,
   key: 'table-left',
   label:
-    by === 'guest' ? 'Guest left the table' : by === 'system' ? 'Table freed automatically' : 'Table cleared by staff',
+    by === 'guest'
+      ? 'Guest left the table'
+      : by === 'review'
+      ? 'Table freed — the party left a review'
+      : by === 'system'
+      ? 'Table freed automatically'
+      : 'Table cleared by staff',
   at: new Date(),
   tableNumber: table.number || '',
   customerName: table.occupantName || '',
   orderNumber: '',
   orderId: null,
-  by: by === 'guest' ? 'customer' : 'staff',
+  by: by === 'guest' || by === 'review' ? 'customer' : 'staff',
 });
 
 /**

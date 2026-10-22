@@ -3,6 +3,7 @@ const router = express.Router();
 const Feedback = require('../models/Feedback');
 const Order = require('../models/Order');
 const { authenticate } = require('../middleware/auth');
+const { clearTableAfterReview } = require('../utils/visit');
 
 // Submit feedback (customer only)
 router.post('/submit', authenticate, async (req, res) => {
@@ -15,7 +16,11 @@ router.post('/submit', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    if (order.userId.toString() !== req.user.userId) {
+    // The token carries the diner as `id`; reading `userId` off it made this
+    // check compare against undefined, so every review was refused.
+    const userId = req.user.id || req.user.userId;
+
+    if (order.userId.toString() !== String(userId)) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
@@ -32,7 +37,7 @@ router.post('/submit', authenticate, async (req, res) => {
     // Create feedback
     const feedback = new Feedback({
       orderId,
-      userId: req.user.userId,
+      userId,
       orderNumber,
       shopRating,
       shopFeedback,
@@ -48,7 +53,9 @@ router.post('/submit', authenticate, async (req, res) => {
     order.feedbackId = feedback._id;
     await order.save();
 
-    res.status(201).json({ message: 'Feedback submitted successfully', feedback });
+    const tableCleared = await clearTableAfterReview(req.app.get('io'), userId);
+
+    res.status(201).json({ message: 'Feedback submitted successfully', feedback, tableCleared });
   } catch (error) {
     console.error('Submit feedback error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });

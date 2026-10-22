@@ -8,6 +8,7 @@ const TableSession = require('../models/TableSession');
 const User = require('../models/User');
 const { authenticate } = require('../middleware/auth');
 const { orderEvents, emitActivity, emitTableChange } = require('../utils/activity');
+const { clearTableAfterReview } = require('../utils/visit');
 
 // GET /api/orders - Get user orders
 router.get('/', authenticate, async (req, res) => {
@@ -465,10 +466,15 @@ router.post('/:id/feedback', authenticate, async (req, res) => {
 
     await order.save();
 
+    // A rating means the meal is done with, so the table is handed back
+    // unless the same party still has food coming.
+    const tableCleared = await clearTableAfterReview(req.app.get('io'), order.userId);
+
     res.json({
       success: true,
       message: 'Feedback submitted successfully',
-      order
+      order,
+      tableCleared
     });
   } catch (error) {
     console.error('Submit feedback error:', error);

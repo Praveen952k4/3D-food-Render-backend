@@ -3,6 +3,7 @@ const router = express.Router();
 const FoodItem = require('../models/FoodItem');
 const Order = require('../models/Order');
 const { authenticate } = require('../middleware/auth');
+const { clearTableAfterReview } = require('../utils/visit');
 
 // Submit feedback for food items in an order
 router.post('/submit', authenticate, async (req, res) => {
@@ -104,10 +105,15 @@ router.post('/submit', authenticate, async (req, res) => {
     order.hasFeedback = true;
     await order.save();
 
+    // They have rated the meal, so the visit is over: the table goes back on
+    // the floor unless something is still cooking for them.
+    const tableCleared = await clearTableAfterReview(req.app.get('io'), req.user.id);
+
     res.json({
       success: true,
       message: 'Feedback submitted successfully',
       results,
+      tableCleared,
     });
   } catch (error) {
     console.error('Submit item feedback error:', error);

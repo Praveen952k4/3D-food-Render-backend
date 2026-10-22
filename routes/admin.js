@@ -427,9 +427,11 @@ router.get('/feedback-summary', async (req, res) => {
     };
 
     ordersWithRatings.forEach((order) => {
-      if (order.rating) {
-        ratingDistribution[order.rating]++;
-      }
+      if (!order.rating) return;
+      // Ratings are whole stars, but an order carrying anything else would
+      // otherwise land on a bucket that does not exist and read as NaN.
+      const star = Math.min(5, Math.max(1, Math.round(order.rating)));
+      ratingDistribution[star]++;
     });
 
     // Recent feedback (last 10)

@@ -103,6 +103,18 @@ router.post('/submit', authenticate, async (req, res) => {
 
     // Mark order as having feedback
     order.hasFeedback = true;
+
+    // The admin's feedback figures are read off the order's own rating, so a
+    // meal rated dish by dish — which is how most diners rate anything here —
+    // counted for nothing on the dashboard. The order now carries the average
+    // of what they said, rounded to a whole star so it falls in a bucket.
+    const rated = (itemFeedbacks || []).filter((item) => Number(item.rating) > 0);
+    if (rated.length) {
+      const average = rated.reduce((sum, item) => sum + Number(item.rating), 0) / rated.length;
+      order.rating = Math.min(5, Math.max(1, Math.round(average)));
+      order.feedbackDate = new Date();
+    }
+
     await order.save();
 
     // They have rated the meal, so the visit is over: the table goes back on

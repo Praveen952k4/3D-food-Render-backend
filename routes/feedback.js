@@ -51,6 +51,12 @@ router.post('/submit', authenticate, async (req, res) => {
     // Update order
     order.hasFeedback = true;
     order.feedbackId = feedback._id;
+    // The dashboard counts feedback off the order, so what they said about the
+    // restaurant has to land there too, not only in the feedback collection.
+    if (Number(shopRating) > 0) {
+      order.rating = Math.min(5, Math.max(1, Math.round(Number(shopRating))));
+      order.feedbackDate = new Date();
+    }
     await order.save();
 
     const tableCleared = await clearTableAfterReview(req.app.get('io'), userId);

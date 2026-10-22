@@ -36,6 +36,9 @@ const describe = async (table) => {
     label: table.label,
     seats: table.seats,
     isOccupied: Boolean(table.occupiedBy),
+    // Taken out of service by staff: the guest door never offers it, and the
+    // floor board shows it set aside rather than free.
+    isFrozen: !table.isActive,
     occupantName: table.occupantName,
     heldVia: table.heldVia,
     occupiedAt: table.occupiedAt,
@@ -63,13 +66,16 @@ router.get('/', authenticate, async (req, res) => {
       return res.status(403).json({ success: false, message: 'Staff only.' });
     }
 
-    const tables = await Table.find({ isActive: true }).sort({ number: 1 });
+    // Staff see the frozen tables too — hiding them would leave nobody able
+    // to put one back into service.
+    const tables = await Table.find().sort({ number: 1 });
     const described = await Promise.all(tables.map(describe));
 
     res.json({
       success: true,
       tables: described,
       occupied: described.filter((t) => t.isOccupied).length,
+      frozen: described.filter((t) => t.isFrozen).length,
       settings: { idleMinutes: IDLE_MINUTES, graceMinutes: GRACE_MINUTES },
     });
   } catch (error) {
@@ -227,6 +233,53 @@ router.post('/:number/free', authenticate, isAdmin, async (req, res) => {
   } catch (error) {
     console.error('Free table error:', error);
     res.status(500).json({ success: false, message: 'Could not clear that table.' });
+  }
+});
+
+// POST /api/tables/:number/freeze - take a table out of service, or put it back
+//
+// A table can be unusable for reasons the floor knows nothing about: a broken
+// leg, a leak above it, a corner being set up for something later. Frozen, it
+// disappears from the guest door and the server refuses anyone who tries it by
+// number, so nobody is seated at it until staff say otherwise.
+router.post('/:number/freeze', authenticate, isAdmin, async (req, res) => {
+  try {
+    const frozen = req.body.frozen !== false;
+    const table = await Table.findOne({ number: req.params.number });
+    if (!table) return res.status(404).json({ success: false, message: 'No such table.' });
+
+    // Freezing a table with people at it would strand them: their session
+    // would still be running at a table the floor no longer offers. Clearing
+    // the table first is a decision for staff to make, not for this to make
+    // quietly on their behalf.
+    if (frozen && table.occupiedBy) {
+      return res.status(409).json({
+        success: false,
+        message: `Table ${table.number} has a party at it. Clear it first, then freeze it.`,
+      });
+    }
+
+    if (table.isActive === !frozen) {
+      return res.json({
+        success: true,
+        message: `Table ${table.number} is already ${frozen ? 'frozen' : 'in service'}`,
+        table: await describe(table),
+      });
+    }
+
+    table.isActive = !frozen;
+    await table.save();
+    emitTableChange(req.app.get('io'), table);
+
+    console.log(`${frozen ? '🧊' : '♻️'} Table ${table.number} ${frozen ? 'frozen' : 'back in service'} by ${req.user.role}`);
+    res.json({
+      success: true,
+      message: `Table ${table.number} is ${frozen ? 'out of service' : 'back in service'}`,
+      table: await describe(table),
+    });
+  } catch (error) {
+    console.error('Freeze table error:', error);
+    res.status(500).json({ success: false, message: 'Could not change that table.' });
   }
 });
 

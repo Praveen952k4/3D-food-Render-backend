@@ -3,6 +3,7 @@ const router = express.Router();
 const Order = require('../models/Order');
 const { authenticate, isAdmin } = require('../middleware/auth');
 const { GST_RATE, round2, gstForOrder, gstTotals, isPaid } = require('../utils/gst');
+const { dishTimings } = require('../utils/timings');
 
 // Apply authentication and admin check
 router.use(authenticate);
@@ -361,6 +362,10 @@ router.get('/overview', async (req, res) => {
       });
     });
 
+    // Every order counts towards how long the food took, paid or not: a bill
+    // that has not been settled says nothing about the kitchen.
+    const timings = dishTimings(orders);
+
     const countBy = (field) =>
       orders.reduce((acc, o) => {
         const k = o[field] || 'unknown';
@@ -391,6 +396,7 @@ router.get('/overview', async (req, res) => {
         gst,
         series,
         topDishes: Object.values(dishes).sort((a, b) => b.revenue - a.revenue).slice(0, 8),
+        dishTimings: timings,
         categoryBreakdown: Object.values(categories).sort((a, b) => b.revenue - a.revenue),
         statusBreakdown: Object.entries(countBy('status')).map(([name, value]) => ({ name, value })),
         paymentBreakdown: Object.entries(countBy('paymentStatus')).map(([name, value]) => ({ name, value })),

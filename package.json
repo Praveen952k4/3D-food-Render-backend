@@ -8,7 +8,7 @@
     "dev": "nodemon server.js",
     "seed": "node seed.js",
     "check-db": "node check-db.js",
-    "test": "node tests/gst.test.js && node tests/enquiry.test.js"
+    "test": "node tests/gst.test.js && node tests/enquiry.test.js && node tests/timings.test.js"
   },
   "keywords": [
     "restaurant",

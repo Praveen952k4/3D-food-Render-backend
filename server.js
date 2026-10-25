@@ -118,7 +118,17 @@ mongoose.connection.on('error', (err) => {
 });
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI)
+//
+// An unset MONGODB_URI is a deployment that was never finished, not a
+// database that is refusing us. Saying so here means the health check and
+// the gate below can report the missing setting by name, rather than
+// mongoose's "the `uri` parameter to `openUri()` must be a string".
+if (!process.env.MONGODB_URI) {
+  lastDbError = new Error('MONGODB_URI is not set in this environment.');
+  console.error('❌ MONGODB_URI is not set — every route that needs the database will fail.');
+}
+
+(process.env.MONGODB_URI ? mongoose.connect(process.env.MONGODB_URI) : Promise.reject(lastDbError))
 .then(async () => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('✅ MongoDB Connected Successfully!');
@@ -154,6 +164,33 @@ mongoose.connect(process.env.MONGODB_URI)
   // reconnects underneath.
 });
 
+const DB_STATE = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+
+// Almost every route needs the database, so a request that arrives while
+// there is no connection used to wait ten seconds for mongoose to give up
+// buffering and then fail with `Operation \`users.findOne()\` buffering timed
+// out` — which names no cause and reaches the diner as "could not send the
+// code". Answer straight away instead, and say which half is broken.
+//
+// Only a connection that cannot work is turned away. While mongoose is still
+// connecting it buffers the request and runs it on success, which is what a
+// serverless cold start depends on.
+const needsDatabase = (req) => req.path.startsWith('/api') && req.path !== '/api/health';
+
+app.use((req, res, next) => {
+  const hopeless = mongoose.connection.readyState === 0 && lastDbError;
+  if (!hopeless || !needsDatabase(req)) return next();
+
+  res.status(503).json({
+    success: false,
+    message: 'The database is unreachable, so nothing can be read or saved right now.',
+    database: {
+      state: DB_STATE[mongoose.connection.readyState] || 'unknown',
+      lastError: lastDbError.message,
+    },
+  });
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/bookings', bookingRoutes);
@@ -178,8 +215,6 @@ app.use('/api/enquiries', enquiryRoutes);
 // guessing and knowing. No connection string or credential is reported: the
 // host it reached, and what it said, are enough to tell a blocked network
 // from a refused password.
-const DB_STATE = ['disconnected', 'connected', 'connecting', 'disconnecting'];
-
 app.get('/api/health', (req, res) => {
   const { readyState, host, name } = mongoose.connection;
   res.json({

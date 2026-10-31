@@ -27,6 +27,13 @@ const describe = async (table) => {
       })
     : 0;
 
+  const totalOrders = table.occupiedBy
+    ? await Order.countDocuments({
+        tableNumber: { $in: [table.number, `Table ${table.number}`] },
+        userId: table.occupiedBy,
+      })
+    : 0;
+
   const servedMinutesAgo = table.lastServedAt
     ? Math.round((Date.now() - new Date(table.lastServedAt)) / 60000)
     : null;
@@ -51,6 +58,8 @@ const describe = async (table) => {
     // whenever they like, and the table will free itself if they just walk out.
     canLeave: Boolean(table.occupiedBy) && activeOrders === 0 && Boolean(table.lastServedAt),
     activeOrders,
+    totalOrders,
+    orderCount: totalOrders || activeOrders,
     freesItselfInMinutes:
       servedMinutesAgo !== null && activeOrders === 0
         ? Math.max(IDLE_MINUTES - servedMinutesAgo, 0)

@@ -75,7 +75,13 @@ router.get('/availability', async (req, res) => {
     const partySize = Math.max(Number(req.query.partySize) || 1, 1);
     const durationMinutes = Number(req.query.durationMinutes) || DEFAULT_DURATION;
 
-    const tables = await Table.find({ isActive: true }).sort({ number: 1 });
+    const tables = await Table.find({ isActive: true });
+    tables.sort((a, b) => {
+      const numA = parseInt(String(a.number).replace(/\D/g, ''), 10);
+      const numB = parseInt(String(b.number).replace(/\D/g, ''), 10);
+      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+      return String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
+    });
     const slotStartsNow = when.getTime() <= Date.now() + 15 * 60000;
 
     const availability = [];

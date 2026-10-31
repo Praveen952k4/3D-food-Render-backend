@@ -453,8 +453,13 @@ router.post('/staff/login', async (req, res) => {
 router.get('/tables', async (req, res) => {
   try {
     const tables = await Table.find({ isActive: true })
-      .sort({ number: 1 })
       .select('number label seats occupiedBy occupiedAt heldVia');
+    tables.sort((a, b) => {
+      const numA = parseInt(String(a.number).replace(/\D/g, ''), 10);
+      const numB = parseInt(String(b.number).replace(/\D/g, ''), 10);
+      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+      return String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
+    });
 
     res.json({
       success: true,

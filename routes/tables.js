@@ -68,7 +68,13 @@ router.get('/', authenticate, async (req, res) => {
 
     // Staff see the frozen tables too — hiding them would leave nobody able
     // to put one back into service.
-    const tables = await Table.find().sort({ number: 1 });
+    const tables = await Table.find();
+    tables.sort((a, b) => {
+      const numA = parseInt(String(a.number).replace(/\D/g, ''), 10);
+      const numB = parseInt(String(b.number).replace(/\D/g, ''), 10);
+      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+      return String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
+    });
     const described = await Promise.all(tables.map(describe));
 
     res.json({
